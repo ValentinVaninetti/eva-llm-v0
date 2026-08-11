@@ -1,0 +1,17 @@
+[package]
+name = "eva_llm_v0"
+version = "0.1.0"
+edition = "2021"
+description = "EVA v0 — LLM propio desde cero. Cero dependencias, sin CUDA, arquitectura experimental de memoria multi-escala."
+
+[dependencies]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
+
+[profile.dev]
+opt-level = 1

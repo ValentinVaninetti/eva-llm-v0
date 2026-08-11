@@ -177,6 +177,34 @@ tabla sólo diluía. El resultado original no era un artefacto.
 - Una sola cabeza, y posiciones absolutas aprendidas (el esquema posicional más
   débil). Con RoPE o multi-cabeza el resultado podría moverse.
 
+## Generación: 37 → 750 tokens/s
+
+`generate` rehacía la pasada completa sobre toda la ventana **para cada token**
+y de las 64 filas que calculaba usaba una y tiraba 63. Ahora el estado viaja
+(`src/stream.rs`) y cada token cuesta un token.
+
+| tokens | antes | ahora |
+|--------|-------|-------|
+| 64     | 37.5 tok/s | **356.4** |
+| 256    | 29.1 tok/s | **524.5** |
+| 1024   | se degradaba | **750.6** |
+
+Lo que importa no es el múltiplo: es que antes la velocidad **caía** al crecer
+el contexto y ahora **sube**. El costo por token es constante; lo único que se
+amortiza es el arranque.
+
+Eso sale de una propiedad de la arquitectura, no de una optimización: **el
+estado de ClockMem es de tamaño fijo**. Un transformer necesita un caché de
+claves y valores que crece con cada token. Los dos están implementados y hay
+tests que miden la diferencia: el de ClockMem no crece después de 200 tokens;
+el de la atención crece hasta el tope de la ventana y ahí hay que recortarlo
+--o crecería para siempre.
+
+`stream.rs` es una **segunda implementación de la misma matemática**, que es
+donde dos caminos se desincronizan en silencio. Por eso el test que exige que
+el paso a paso dé lo mismo que la pasada completa se escribió antes que el
+código, y corre para las dos arquitecturas.
+
 ## Trampas que ya nos costaron caro
 
 Están documentadas en el encabezado de cada archivo, pero conviene tenerlas juntas:

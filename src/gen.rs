@@ -101,18 +101,28 @@ pub fn generate_constrained(
     seq: usize,
     constraint: &mut dyn Constraint,
 ) -> Vec<usize> {
+    let _ = seq; // el recorte de ventana ahora lo maneja el estado
     let mut ctx: Vec<usize> = prompt.to_vec();
     let mut out: Vec<usize> = Vec::with_capacity(max_tokens);
+    if ctx.is_empty() {
+        return out;
+    }
+
+    // Antes esto rehacía la pasada completa sobre toda la ventana para CADA
+    // token y descartaba todas las filas menos la última: hasta 64x de trabajo
+    // tirado. Ahora el estado viaja y cada token cuesta un token.
+    let mut st = crate::stream::Streamer::new(model);
+    let mut logits = Vec::new();
+    for &id in &ctx {
+        logits = st.next(id);
+    }
+
     for _ in 0..max_tokens {
-        let start = ctx.len().saturating_sub(seq);
-        let window = &ctx[start..];
-        let logits = model.forward(window);
-        let (s, v) = (logits.shape[0], logits.shape[1]);
-        let mask = constraint.allowed(&ctx, v);
-        let last = &logits.data[(s - 1) * v..s * v];
-        let tok = sample_masked(last, &mask, temp, top_k, rng);
+        let mask = constraint.allowed(&ctx, logits.len());
+        let tok = sample_masked(&logits, &mask, temp, top_k, rng);
         ctx.push(tok);
         out.push(tok);
+        logits = st.next(tok);
     }
     out
 }

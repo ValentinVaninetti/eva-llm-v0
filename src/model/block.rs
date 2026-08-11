@@ -6,6 +6,46 @@ use crate::rng::Rng;
 use crate::tensor::ops as ops;
 use crate::tensor::Tensor;
 
+/// Los dos mezcladores posibles. La comparación entre ellos es el experimento
+/// central del proyecto, así que viven al mismo nivel y con la misma interfaz.
+pub enum Mixer {
+    Clock(ClockMem),
+    Attn(Attention),
+}
+
+impl Module for Mixer {
+    fn forward(&self, x: &Tensor) -> Tensor {
+        match self {
+            Mixer::Clock(m) => m.forward(x),
+            Mixer::Attn(m) => m.forward(x),
+        }
+    }
+    fn parameters(&self) -> Vec<&Tensor> {
+        match self {
+            Mixer::Clock(m) => m.parameters(),
+            Mixer::Attn(m) => m.parameters(),
+        }
+    }
+    fn parameters_mut(&mut self) -> Vec<&mut Tensor> {
+        match self {
+            Mixer::Clock(m) => m.parameters_mut(),
+            Mixer::Attn(m) => m.parameters_mut(),
+        }
+    }
+    fn named_parameters(&self, prefix: &str) -> Vec<(String, &Tensor)> {
+        match self {
+            Mixer::Clock(m) => m.named_parameters(prefix),
+            Mixer::Attn(m) => m.named_parameters(prefix),
+        }
+    }
+    fn named_parameters_mut(&mut self, prefix: &str) -> Vec<(String, &mut Tensor)> {
+        match self {
+            Mixer::Clock(m) => m.named_parameters_mut(prefix),
+            Mixer::Attn(m) => m.named_parameters_mut(prefix),
+        }
+    }
+}
+
 pub struct EvaBlock {
     pub norm0: RMSNorm,
     pub conv: DepthwiseConv1d,
@@ -13,7 +53,13 @@ pub struct EvaBlock {
     /// El mezclador temporal, que es LA variable del experimento. Todo lo
     /// demás del bloque es idéntico entre arquitecturas a propósito: si
     /// cambiara algo más, la comparación no diría cuál de los dos cambios fue.
-    pub mixer: Box<dyn Module>,
+    ///
+    /// Enum y no `Box<dyn Module>`: la inferencia con estado necesita saber
+    /// CUÁL es para llevar el estado que corresponde --un vector fijo de D
+    /// para ClockMem, un caché que crece para la atención-- y eso no se puede
+    /// preguntar a través de un objeto de trait. De paso saca el despacho
+    /// dinámico del camino caliente.
+    pub mixer: Mixer,
     pub norm2: RMSNorm,
     pub glu: GLUFFN,
 }
@@ -25,8 +71,8 @@ impl EvaBlock {
             conv: DepthwiseConv1d::new(d, kernel, rng),
             norm1: RMSNorm::new(d, eps),
             mixer: match arch {
-                Arch::Clock => Box::new(ClockMem::new(d, rng)) as Box<dyn Module>,
-                Arch::Attn => Box::new(Attention::new(d, rng)),
+                Arch::Clock => Mixer::Clock(ClockMem::new(d, rng)),
+                Arch::Attn => Mixer::Attn(Attention::new(d, rng)),
             },
             norm2: RMSNorm::new(d, eps),
             glu: GLUFFN::new(d, ffn, rng),

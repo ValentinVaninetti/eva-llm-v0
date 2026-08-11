@@ -11,6 +11,7 @@ pub mod pool;
 pub mod prof;
 pub mod rng;
 pub mod save;
+pub mod stream;
 pub mod tensor;
 pub mod tokenizer;
 pub mod train;

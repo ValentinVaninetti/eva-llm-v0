@@ -1,154 +1,240 @@
 # Cómo aprende este cerebro
 
-Documento de diseño. Separa con cuidado tres cosas que no valen lo mismo:
-**medido**, **construido pero sin medir**, y **propuesto**. Todo lo que diga
-"propuesto" es una apuesta, no un plan cerrado.
+Documento de diseño y bitácora de razonamiento. Separa con cuidado tres cosas
+que no valen lo mismo: **medido**, **construido sin medir**, y **propuesto**.
+Todo lo que diga "propuesto" es una apuesta.
 
-## El problema, con la aritmética adelante
+---
 
-Entrenar una red hoy tiene un costo dominante que casi nadie nombra: **para
-retropropagar hay que guardar las activaciones de toda la pasada hacia
-adelante**. La memoria crece con profundidad × ancho × largo de secuencia, y es
-lo que empuja a comprar hardware caro. No es el cómputo: es la memoria.
+## Parte I — Por qué es caro hoy
 
-Nuestro autograd hace exactamente eso, y peor: cada operación **clona sus
-entradas** en `saved_v`. `clockmem` sola clona cinco tensores de `s×d` por
-llamada. Medido: la maquinaria de autograd sin contar matmul se lleva ~96 s de
-201 en un entrenamiento de 861 pasos.
+No hay una respuesta: hay dos costos con causas distintas.
 
-El resto del gasto son convenciones, no física:
+### Entrenar
 
-- Todo token recibe el mismo esfuerzo, aunque la mayoría de un corpus sea
-  trivialmente predecible.
-- Todo parámetro se actualiza para todo token.
-- Se reaprende lo mismo millones de veces, sin noción de "esto ya lo sé".
-- Aprender e inferir son fases separadas, y lo aprendido en una conversación
-  muere con ella.
+El costo es **≈ 6 × N × D** (parámetros × tokens de entrenamiento). El 6 sale
+de dos operaciones por parámetro en la ida, dos para el gradiente respecto de
+las activaciones y dos para el gradiente respecto de los pesos. **El backward
+cuesta el doble que el forward, por construcción.**
 
-## Cómo aprende un animal, y qué de eso se puede copiar
+Por qué N y D son enormes:
 
-No todo lo que hace un cerebro es transferible ni conviene fetichizarlo. Pero
-hay cuatro cosas que **sí** tienen traducción computacional directa:
+- **D es enorme porque el descenso por gradiente es un modo absurdamente
+  ineficiente de guardar algo.** Para aprender un hecho hay que verlo muchas
+  veces, y cada vez se empujan un poquito millones de pesos. Escribirlo en una
+  tabla cuesta una operación.
+- **N es enorme porque la mayoría de los parámetros son almacén, no
+  razonamiento.** Las estimaciones de la literatura rondan los 2 bits de
+  conocimiento por parámetro.
 
-1. **Dos sistemas con velocidades distintas.** El hipocampo aprende de un solo
-   golpe y es caro de mantener; la corteza aprende lento y generaliza. Lo nuevo
-   entra rápido y sin gradientes; lo que resulta valioso se destila después.
-   Esto no es metáfora: es *Complementary Learning Systems*, y explica por qué
-   una red sola sufre olvido catastrófico y un animal no.
+**El nudo:** toleramos ese costo porque la representación distribuida
+generaliza y una tabla no interpola. Generalizar exige representación
+distribuida; la representación distribuida exige gradiente; el gradiente es
+carísimo. Pagamos precio de generalización para guardar cosas que sólo
+necesitan recordarse.
+
+### Inferir
+
+Otra cuenta y da distinto: generar un token obliga a **leer todos los pesos
+activos**. No es cómputo, es tráfico.
+
+Balance de la máquina de prueba: 8 núcleos con AVX2 dan del orden de
+250 GFLOP/s en `f32`; la memoria, decenas de GB/s. El hardware está balanceado
+alrededor de **~6 operaciones por byte leído**. Una generación densa pide dos
+operaciones por peso de cuatro bytes: **0,5 operaciones por byte**. Se le está
+pidiendo al procesador **una décima parte** de lo que sabe hacer por byte
+traído.
+
+*(El ancho de banda exacto de esta máquina está SIN medir bien: el benchmark
+que hice medía su propio lazo. El desbalance de un orden de magnitud sí es
+robusto; el factor preciso, no.)*
+
+**De ahí sale la economía, sin conspiración:** un modelo denso con un usuario
+lee miles de millones de pesos para producir un token. Con mil usuarios en
+paralelo, esa misma lectura sirve para mil tokens. La estructura de costos
+premia servir a muchos y castiga al usuario local. Es consecuencia de densidad
++ ancho de banda, y explica por qué nadie con incentivo de vender cómputo tiene
+apuro en arreglarlo.
+
+### Qué es física y qué es costumbre
+
+| | |
+|---|---|
+| Leer los pesos activos para generar un token | **física** |
+| Que "los activos" sean *todos* los pesos | elección (densidad) |
+| Que el backward cueste 2× el forward | física **de backprop** |
+| Que haga falta backprop | **elección** |
+| Guardar activaciones de toda la red para retropropagar | consecuencia de esa elección |
+| Que el conocimiento viva en el mismo sustrato que el cómputo | **elección** |
+| Que aprender un hecho requiera verlo miles de veces | consecuencia de esa elección |
+| Que generalizar requiera representación distribuida | **física**, hasta donde sabemos |
+
+Sólo la última fila es irreductible. El resto son decisiones que se tomaron una
+vez y se volvieron costumbre.
+
+---
+
+## Parte II — La hipótesis central
+
+> **¿Se puede separar lo que necesita generalizar de lo que sólo necesita
+> recordarse, sin perder la capacidad de razonar sobre lo recordado?**
+
+Si la respuesta es sí, el costo se derrumba: la estructura del lenguaje y los
+patrones de razonamiento son *poca* información y sí necesitan gradiente; los
+hechos son *mucha* y no necesitan generalizar.
+
+Si es no, el gasto de hoy está justificado y hay poco que hacer.
+
+**No está saldado en la literatura** — es el debate paramétrico contra
+recuperación. No se puede afirmar, hay que medirlo.
+
+### El experimento que lo decide
+
+Un modelo de N parámetros contra **un modelo de N/2 con acceso a una búsqueda
+sobre el corpus**. Misma validación held-out, mismas semillas. Si el chico con
+búsqueda llega a los mismos bits/byte, la hipótesis queda demostrada con
+números. Si no llega, aprendimos que el conocimiento en los pesos hacía algo
+que la búsqueda no reemplaza.
+
+Es trabajo de verdad —hay que construir el mecanismo de recuperación— pero es
+**decidible**, que es lo único que importa.
+
+---
+
+## Parte III — Lo que hicimos y lo que salió
+
+### MEDIDO: ClockMem le gana a la atención
+
+Mismo bloque, misma conv, mismo FFN, mismos parámetros exactos (cuatro matrices
+DxD cada uno), mismas semillas. 250 KB de prosa real, seq 64, 3 semillas:
+
+    ClockMem        1.8229   2.630 bits/byte   319 s
+    atención        1.8630   2.688             339 s
+    atención + pos  1.9216   2.772             345 s
+
+Sin solapamiento entre grupos. La peor corrida de ClockMem es mejor que la
+mejor de la atención. **No es ruido.**
+
+Lo que **no** dice: seq 64 es corto y es justo donde la atención no puede
+lucirse. Falta la comparación a contexto largo.
+
+### MEDIDO Y NEGATIVO: aprender sólo de lo que sorprende
+
+`src/learn.rs`. Forward siempre; **backward sólo si la pérdida supera lo que el
+modelo venía esperando** (media móvil de la propia pérdida, umbral que se mueve
+solo).
+
+    línea base      1.8229   3515 backwards   319 s
+    barato (1 ép)   2.0275   ~1598 backwards  ~196 s
+    igual-bwd (2 ép) ~1.84   ~3220 backwards  ~410 s
+
+**No sirve.** Con la mitad del aprendizaje pierde 11% de calidad; con el mismo
+presupuesto de backwards empata en calidad pagando **28% más de cómputo total**
+(porque hay que pagar el doble de forwards para juntar los mismos backwards).
+
+**Por qué falló, que es lo valioso:** filtré por **ventana** —64 tokens
+promediados— pero el argumento de "la mayoría del corpus es trivial" es sobre
+**tokens**. Al promediar 64 la varianza se lava: todas las ventanas tienen una
+mezcla parecida de fácil y difícil, y no queda nada que elegir.
+
+**Y aunque hubiera filtrado por token, tampoco ahorraba:** enmascarar la
+pérdida de los tokens fáciles no abarata el backward, porque el backward
+recorre el grafo entero igual. **La sparsity en la pérdida no se cobra si el
+cómputo es denso.**
+
+Conclusión que deja: *el problema no es de qué aprendemos, es que backprop hace
+que cada evento de aprendizaje cueste la red entera.* Ningún truco sobre los
+datos lo arregla.
+
+---
+
+## Parte IV — Cómo aprende un animal, y qué de eso sirve
+
+Cuatro cosas con traducción computacional directa:
+
+1. **Dos sistemas a velocidades distintas.** Hipocampo: de un golpe, caro de
+   mantener. Corteza: lento, generaliza. No es metáfora — es *Complementary
+   Learning Systems*, y explica por qué una red sola sufre olvido catastrófico
+   y un animal no.
 2. **Consolidación durante el sueño.** El sistema lento no se entrena con el
-   mundo en vivo: se entrena con **repeticiones** de lo que el sistema rápido
-   guardó. O sea, con datos ya filtrados por relevancia.
-3. **Se aprende del error de predicción**, no de etiquetas. Predecir siempre,
-   propagar sólo lo que falló.
-4. **El crédito es local.** No hay ningún mecanismo biológico conocido que
-   transporte pesos hacia atrás por toda la red. Cada sinapsis se ajusta con lo
-   que tiene cerca.
+   mundo en vivo sino **repitiendo** lo que el rápido guardó: datos ya
+   filtrados por relevancia.
+3. **Se aprende del error de predicción**, no de etiquetas.
+4. **El crédito es local.** No hay mecanismo biológico conocido que transporte
+   pesos hacia atrás por toda la red.
 
-Lo que **no** voy a copiar porque es cargo cult: picos, neuronas de integración
-y disparo, y cualquier cosa que se justifique sólo por parecerse a una neurona.
+**Lo que NO se copia porque es cargo cult:** picos, neuronas de integración y
+disparo, y cualquier cosa que se justifique sólo por parecerse a una neurona.
 El criterio es si baja el costo o sube la calidad, medido.
 
-## Las tres memorias
+---
 
-El diseño es una jerarquía por escala de tiempo. Cada pieza es un módulo con su
-propio archivo, su propio test y la posibilidad de apagarse.
+## Parte V — El diseño
 
-### 1. Estado — milisegundos — **CONSTRUIDO Y MEDIDO**
+### Las tres memorias, por escala de tiempo
 
-`ClockMem`: `s_t = α ⊙ s_{t-1} + β(k_t ⊙ v_t)`, con `α` por canal aprendido.
-Lleva el contexto actual en **D números de tamaño fijo**.
+**1. Estado — milisegundos — CONSTRUIDO Y MEDIDO.** `ClockMem`. Lleva el
+contexto en D números de tamaño fijo.
 
-Medido contra atención de una cabeza con los mismos parámetros exactos, tres
-semillas, sin solapamiento: **2.630 vs 2.688 bits/byte**, y 6% más rápido.
+**2. Memoria rápida — minutos a horas — PROPUESTO.** Clave-valor escrita en
+inferencia, de un solo golpe, sin gradientes (tipo Hebb), con olvido propio.
+**Aprender algo nuevo cuesta O(D)** en vez de una pasada ida y vuelta por toda
+la red. Riesgo real: interferencia entre claves parecidas.
 
-### 2. Memoria rápida — minutos a horas — **PROPUESTO**
+**3. Pesos lentos — el sueño — PROPUESTO.** La red se entrena repitiendo lo que
+la memoria rápida acumuló y sobrevivió a su propio olvido. El paso caro deja de
+ser continuo y pasa a ser esporádico sobre un conjunto chico y curado.
 
-Una memoria clave-valor escrita **en inferencia, de un solo golpe, sin
-gradientes**: cuando el modelo predice mal, escribe la asociación con una
-actualización local tipo Hebb (producto externo), con su propio olvido.
+### Las cuatro palancas
 
-Por qué importa para el hardware: **aprender algo nuevo cuesta O(D) en vez de
-una pasada hacia adelante y otra hacia atrás por toda la red.** Tres órdenes de
-magnitud menos por hecho nuevo. Y no hay fase de entrenamiento: aprende
-mientras corre.
+**A. Sorpresa — MEDIDA Y DESCARTADA.** Ver Parte III.
 
-El riesgo real: interferencia. Dos claves parecidas se pisan y la memoria se
-degrada. Por eso existe la tercera capa.
+**B. Crédito local: nunca sostener el grafo entero — PROPUESTO. La grande.**
+Que cada bloque tenga su propio objetivo local y ningún gradiente cruce de un
+bloque a otro. La memoria de entrenamiento pasa de *profundidad × activaciones*
+a **un bloque por vez**: una red de N bloques se entrena con la memoria de uno.
+Es literalmente la diferencia entre necesitar una GPU y no necesitarla.
 
-### 3. Pesos lentos — el sueño — **PROPUESTO**
+*Honestidad:* **las reglas locales rinden peor que backprop en todo intento
+serio publicado.** Lo que da esperanza: siempre se las probó sobre
+arquitecturas diseñadas *para* backprop. Nadie las probó sobre un recurrente
+con decaimiento por canal, donde el crédito temporal ya es analítico y local.
 
-La red no se entrena con el mundo en vivo, sino **repitiendo lo que la memoria
-rápida acumuló** y sobrevivió a su propio olvido. Descenso por gradiente sí,
-pero sobre datos ya filtrados por "esto apareció y sirvió más de una vez".
+**C. Cómputo condicional que entre en caché — PROPUESTO.** Que el conjunto
+activo por token entre en L2/L3 (8 MB acá; el modelo entero son 11 MB en f32 y
+2,8 MB en int8). Ataca el único piso físico: la palanca no es leer más rápido,
+es leer menos.
 
-Consecuencia de hardware: el paso caro deja de ser continuo y pasa a ser
-esporádico, sobre un conjunto chico y curado.
+**D. Inferencia con estado — PROPUESTO, desperdicio ya medido.** Hoy
+`generate` rehace la pasada completa sobre toda la ventana para cada token y
+**descarta 63 de las 64 filas** que calculó. Un transformer no puede evitarlo
+sin un caché KV que crece; ClockMem sí, porque su estado es de tamaño fijo.
 
-## Las cuatro palancas de eficiencia
+### Orden
 
-Independientes entre sí, apagables, y cada una con su medición.
+1. **D** — una tarde, desperdicio medido, sin riesgo.
+2. **B** — la apuesta grande. Decide si "entrenar con algo mínimo" es real.
+3. **El experimento de la Parte II** — decide la hipótesis central.
+4. **2 y 3** (memoria rápida y sueño) — dependen de B.
+5. **C** — última: complica el entrenamiento y sin B no se sostiene.
 
-### A. Aprender sólo de lo que sorprende — **CONSTRUIDO, MIDIÉNDOSE**
-
-`src/learn.rs`. La pasada hacia adelante siempre se hace; el **backward se
-saltea** si la pérdida está por debajo de lo que el modelo venía esperando. La
-expectativa es una media móvil de la propia pérdida, así que el umbral se mueve
-solo a medida que mejora.
-
-El backward cuesta el doble que el forward, así que saltear la mitad borra ~un
-tercio del entrenamiento. Se está midiendo contra la línea base de 2.630 en dos
-condiciones: mismo recorrido de datos (más barato) y **mismo presupuesto de
-backwards** (¿elegir gana?).
-
-Riesgo conocido: aprender sólo de lo que sale mal es aprender el ruido del
-corpus. Por eso se vigila la validación.
-
-### B. Crédito local: nunca sostener el grafo entero — **PROPUESTO. La más importante.**
-
-Que cada bloque tenga su **propio objetivo local** —predecir su próxima entrada—
-y que ningún gradiente cruce de un bloque a otro.
-
-Es la palanca que cambia qué hardware hace falta: la memoria de entrenamiento
-pasa de *profundidad × activaciones* a **un bloque por vez**. Un modelo de N
-bloques se entrena con la memoria de uno. Eso es lo que hace posible entrenar
-en una máquina chica, y no hay optimización de kernel que lo reemplace.
-
-Honestidad: **las reglas locales rinden peor que backprop en todos los intentos
-serios publicados.** No lo vendo como que va a ganar. Lo propongo porque casi
-nadie lo probó sobre un recurrente moderno con objetivo predictivo, porque
-tenemos con qué medirlo bien, y porque si funciona aunque sea parecido, el
-ahorro es estructural.
-
-### C. Cómputo condicional que entre en caché — **PROPUESTO**
-
-Que sólo una fracción de los parámetros se active por token, elegida por el
-propio token, de modo que **el conjunto activo entre en L2/L3**. La máquina de
-prueba tiene 8 MB de L3; nuestro modelo entero son 11 MB en f32 y 2.8 MB en
-int8.
-
-Esto ataca el único piso físico real: generar un token obliga a **leer** los
-pesos activos. La palanca no es leer más rápido, es leer menos.
-
-### D. Inferencia con estado — **PROPUESTO, y hay un desperdicio medido**
-
-Hoy `generate` rehace la pasada completa sobre toda la ventana para cada token
-y **descarta 63 de las 64 filas** que calculó. Con `seq=64` eso es hasta 64x de
-trabajo tirado. Un transformer no puede evitarlo sin un caché KV que crece con
-el contexto; ClockMem sí, porque su estado es de tamaño fijo.
-
-## Orden, por rendimiento medible sobre esfuerzo
-
-1. **A** (sorpresa) — corriendo. Barata, y da número hoy.
-2. **D** (inferencia con estado) — una tarde, desperdicio ya medido, sin riesgo.
-3. **B** (crédito local) — la apuesta grande. Es la que decide si "entrenar con
-   algo mínimo" es real o es marketing.
-4. **2 y 3** (memoria rápida y sueño) — dependen de B para valer la pena.
-5. **C** (condicional) — última: complica el entrenamiento y sin B no se sostiene.
+---
 
 ## La regla de la casa
 
 Nada entra sin medición contra la línea base, con validación held-out y varias
-semillas. Ya van tres veces en este proyecto que la intuición eligió mal el
-cuello: el shader que no era, ClockMem que era el 0.8%, y las posiciones que
-iban a arreglar la comparación y la empeoraron. **La evidencia indirecta sirve
-para elegir qué medir, nunca para concluir.**
+semillas.
+
+**Marcador de la intuición en este proyecto: 0 de 4.**
+
+| creí que | era |
+|---|---|
+| el cuello era el shader | los flags de memoria (2.5x contra 1.13x) |
+| el cuello era ClockMem | el 0,8% del tiempo |
+| la atención estaba lisiada sin posiciones | dárselas la empeoró, 3 de 3 |
+| aprender por sorpresa iba a rendir | empata pagando 28% más |
+
+Cuatro de cuatro en contra. **La evidencia indirecta sirve para elegir qué
+medir, nunca para concluir.** Y una convicción no se gradúa a hecho sin pasar
+por una medición — especialmente la hipótesis central, que es justo la que más
+tentaría saltear.

@@ -139,3 +139,86 @@ pub fn generate(
     let mut nc = NoConstraint;
     generate_constrained(model, prompt, max_tokens, temp, top_k, rng, seq, &mut nc)
 }
+
+/// Qué se hizo en cada posición, para poder decir cuánto se ahorró en vez de
+/// suponerlo.
+#[derive(Default, Debug)]
+pub struct Cuentas {
+    /// La estructura dejaba una sola opción: no se consultó al modelo.
+    pub forzadas: usize,
+    /// Se calcularon sólo algunas columnas de la cabeza.
+    pub parciales: usize,
+    /// El modelo decidió libre, con la cabeza entera.
+    pub libres: usize,
+    /// Columnas de la cabeza calculadas, contra las que se habrían calculado
+    /// sin restricción. Es la medida honesta del ahorro en la salida.
+    pub columnas: usize,
+    pub columnas_sin_restriccion: usize,
+}
+
+/// Genera respetando una restricción **consultada antes de cada paso**.
+///
+/// La diferencia con `generate_constrained` no es qué produce sino qué gasta:
+/// allá la máscara se aplicaba sobre logits ya calculados, acá donde la
+/// estructura no deja elegir el modelo directamente no se consulta.
+pub fn generate_shaped(
+    model: &EvaModel,
+    prompt: &[usize],
+    max_tokens: usize,
+    temp: f32,
+    top_k: usize,
+    rng: &mut Rng,
+    forma: &mut dyn crate::constrain::Constraint,
+) -> (Vec<usize>, Cuentas) {
+    use crate::constrain::Allowed;
+    let mut c = Cuentas::default();
+    let mut ctx: Vec<usize> = prompt.to_vec();
+    let mut out = Vec::with_capacity(max_tokens);
+    if ctx.is_empty() {
+        return (out, c);
+    }
+
+    let vocab = model.cfg.vocab;
+    let mut st = crate::stream::Streamer::new(model);
+    // El prompt se consume sin cabeza: de esas posiciones no sale nada.
+    for &id in &ctx[..ctx.len() - 1] {
+        st.consume(id);
+    }
+    let mut ultimo = ctx[ctx.len() - 1];
+
+    for _ in 0..max_tokens {
+        c.columnas_sin_restriccion += vocab;
+        let tok = match forma.allowed(&ctx) {
+            Allowed::Only(v) if v.len() == 1 => {
+                // Nada que decidir. Se avanza el estado y listo.
+                st.consume(ultimo);
+                c.forzadas += 1;
+                v[0]
+            }
+            Allowed::Only(v) => {
+                let logits = st.next_among(ultimo, &v);
+                c.parciales += 1;
+                c.columnas += v.len();
+                let i = pick(&logits, temp, top_k, rng);
+                v[i]
+            }
+            Allowed::Any => {
+                let logits = st.next(ultimo);
+                c.libres += 1;
+                c.columnas += vocab;
+                let mask = LogitsMask::all(vocab);
+                sample_masked(&logits, &mask, temp, top_k, rng)
+            }
+        };
+        ctx.push(tok);
+        out.push(tok);
+        ultimo = tok;
+    }
+    (out, c)
+}
+
+/// Elige un índice dentro de un puñado de logits ya restringido.
+fn pick(logits: &[f32], temp: f32, top_k: usize, rng: &mut Rng) -> usize {
+    let mask = LogitsMask::all(logits.len());
+    sample_masked(logits, &mask, temp, top_k, rng)
+}

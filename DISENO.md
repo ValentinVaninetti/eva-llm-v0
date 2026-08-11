@@ -288,6 +288,41 @@ empezar. **El costo de la memoria persistente no es el estado: es perder el
 barajado.** Eso vale para cualquier variante futura -- memoria rápida,
 consolidación, lo que sea que necesite continuidad temporal.
 
+### MEDIDO: restringir la salida — modular, correcto, y todavía sin ahorro acá
+
+`src/constrain.rs`. Un trait `Constraint` que se consulta **antes** de cada
+paso (no después, como la máscara que ya había), y devuelve `Any` o `Only`.
+Con una sola opción posible no se consulta al modelo: se emite y se avanza el
+estado sin calcular la proyección de salida.
+
+Molde tipo respuesta estructurada, 100 bytes, mejor de 20 corridas:
+
+    libre        134.8 ms   25600 columnas
+    con molde    138.1 ms   19456 columnas   (24% menos)
+
+**No ahorra tiempo: cuesta 2,5% más.** Y la razón está medida, no supuesta:
+**la cabeza es el 0,9% del paso** (0.0116 ms de 1.3481). Saltearla en el 24% de
+las posiciones ahorra 0,2%, menos de lo que cuesta la contabilidad -- que
+además está escrita en O(n²), releyendo todo el texto en cada consulta.
+
+Sobre esa base medida, la aritmética a otro vocabulario: con 32000 la cabeza
+costaría 125x más y pasaría a ser ~la mitad del paso; ahí el mismo 24% forzado
+ahorraría ~12% del total. **Eso es cuenta, no medición**, y hay que tomarlo
+como tal.
+
+**Dos lecciones del proceso, más útiles que el resultado:**
+
+La primera medición dio **+18% de ahorro** y la segunda **-75%**, con el mismo
+mecanismo. Ninguna era cierta: una corrida sola de 130 ms en esta máquina tiene
+±50% de varianza, y yo estaba tratando de medir un efecto de 0,2%. **El efecto
+estaba dos órdenes por debajo del piso de ruido.** Lo que delató el error fue
+que el +18% no cerraba con el mecanismo: la cabeza no puede explicar más de lo
+que pesa.
+
+Y la justificación de restringir **no es el ahorro, es la calidad**: en el otro
+proyecto, apretar la gramática llevó las respuestas correctas de 4/15 a 60/60.
+El ahorro sería un bonus que a este vocabulario no aparece.
+
 ---
 
 ## Parte IV — Cómo aprende un animal, y qué de eso sirve

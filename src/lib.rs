@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod constrain;
 pub mod data;
 pub mod gen;
 pub mod gpu;

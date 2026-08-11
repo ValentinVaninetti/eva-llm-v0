@@ -79,6 +79,37 @@ impl<'a> Streamer<'a> {
 
     /// Consume un token y devuelve los logits del siguiente.
     pub fn next(&mut self, id: usize) -> Vec<f32> {
+        let x = self.advance(id);
+        let x = rms_norm(&x, &self.model.norm_out);
+        matvec(&x, &self.model.head_w.data, self.model.cfg.dim, self.model.cfg.vocab)
+    }
+
+    /// Consume un token SIN calcular la proyección de salida.
+    ///
+    /// Para cuando la estructura ya decidió qué viene: no hay nada que
+    /// preguntarle al modelo, pero el estado igual tiene que avanzar o se
+    /// desincroniza del texto. Esto es lo que hace que restringir AHORRE en
+    /// vez de sólo evitar el error.
+    pub fn consume(&mut self, id: usize) {
+        self.advance(id);
+    }
+
+    /// Logits de sólo algunas columnas, cuando la estructura dejó pocas
+    /// opciones. Devuelve `(token, logit)` en el mismo orden que `cols`.
+    pub fn next_among(&mut self, id: usize, cols: &[usize]) -> Vec<f32> {
+        let x = self.advance(id);
+        let x = rms_norm(&x, &self.model.norm_out);
+        let d = self.model.cfg.dim;
+        let w = &self.model.head_w.data;
+        let v = self.model.cfg.vocab;
+        cols.iter()
+            .map(|&c| (0..d).map(|i| x[i] * w[i * v + c]).sum())
+            .collect()
+    }
+
+    /// Todo el modelo menos la cabeza: deja el estado listo y devuelve la
+    /// representación de la posición.
+    fn advance(&mut self, id: usize) -> Vec<f32> {
         let cfg = &self.model.cfg;
         let d = cfg.dim;
 
@@ -95,10 +126,8 @@ impl<'a> Streamer<'a> {
         for i in 0..self.model.blocks.len() {
             x = self.block_step(i, &x);
         }
-
-        let x = rms_norm(&x, &self.model.norm_out);
         self.t += 1;
-        matvec(&x, &self.model.head_w.data, d, cfg.vocab)
+        x
     }
 
     fn block_step(&mut self, i: usize, x: &[f32]) -> Vec<f32> {

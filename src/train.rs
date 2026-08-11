@@ -16,6 +16,8 @@ pub struct TrainConfig {
     pub log_every: usize,
     pub out_path: String,
     pub resume: Option<String>,
+    /// Qué fracción de las ventanas se reserva para validar. 0 la apaga.
+    pub val_frac: f32,
 }
 
 pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
@@ -34,17 +36,32 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
     let mut opt = AdamW::new(tcfg.lr, tcfg.wd);
 
     let total_params = model.param_count();
-    let total_steps = n_windows * tcfg.epochs;
-    println!("eva: dataset {} bytes, {} windows, {} params, {} steps",
-        ds.ids.len(), n_windows, total_params, total_steps);
+    println!("eva: dataset {} bytes, {} windows, {} params",
+        ds.ids.len(), n_windows, total_params);
 
+    // EL CORTE VA AL FINAL Y CONTIGUO, no salteado. Las ventanas vecinas
+    // comparten contexto: con un corte aleatorio, el modelo ve en entrenamiento
+    // el texto pegado a lo que después se le toma como examen, y la validación
+    // da mejor de lo que corresponde. Un examen que filtra no mide nada.
+    let n_val = if tcfg.val_frac > 0.0 {
+        (((n_windows as f32) * tcfg.val_frac).round() as usize).clamp(1, n_windows / 2)
+    } else {
+        0
+    };
+    let n_train = n_windows - n_val;
+    if n_train == 0 {
+        return Err("no quedan ventanas de entrenamiento después del corte".into());
+    }
+    println!("eva: {n_train} ventanas para entrenar, {n_val} para validar");
+
+    let total_steps = n_train * tcfg.epochs;
     let mut step = 0usize;
     let mut running = 0.0f32;
     let t0 = Instant::now();
     let mut last_log = Instant::now();
 
     for epoch in 0..tcfg.epochs {
-        let order = ds.shuffled_indices(&mut rng);
+        let order = ds.shuffled_train_indices(n_train, &mut rng);
         for &wi in &order {
             let (input, target) = ds.window(wi);
 
@@ -74,6 +91,11 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
                 last_log = Instant::now();
             }
 
+            if n_val > 0 && step % (tcfg.log_every * 5) == 0 {
+                let vl = eval_loss(&model, &ds, n_train, n_windows);
+                println!("  validación: loss {:.4} | {:.3} bits/byte", vl, bits_per_byte(vl));
+            }
+
             if step % (tcfg.log_every * 10) == 0 {
                 let sample = generate_sample(&model, mcfg.seq_len, 64, &mut rng);
                 println!("sample: {:?}", ByteTokenizer::decode(&sample));
@@ -83,10 +105,35 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
     }
 
     save_model(&tcfg.out_path, &model).map_err(|e| format!("no se pudo guardar: {}", e))?;
+    if n_val > 0 {
+        let vl = eval_loss(&model, &ds, n_train, n_windows);
+        // EL NÚMERO CON EL QUE SE COMPARAN ARQUITECTURAS. La pérdida de
+        // entrenamiento sólo dice cuánto memorizó.
+        println!("eva: VALIDACIÓN FINAL loss {:.4} | {:.3} bits/byte ({} ventanas, arch {})",
+            vl, bits_per_byte(vl), n_windows - n_train, mcfg.arch.name());
+    }
     let elapsed: Duration = t0.elapsed();
     crate::prof::report(elapsed);
     println!("eva: entrenamiento terminado en {:.1}s, pesos en {}", elapsed.as_secs_f32(), tcfg.out_path);
     Ok(())
+}
+
+/// Pérdida media sobre ventanas que el modelo nunca vio. Sin backward.
+fn eval_loss(model: &EvaModel, ds: &TextDataset, from: usize, to: usize) -> f32 {
+    let mut sum = 0.0;
+    for wi in from..to {
+        let (input, target) = ds.window(wi);
+        let logits = model.forward(&input);
+        sum += crate::tensor::ops::cross_entropy(&logits, &target).data[0];
+    }
+    sum / (to - from) as f32
+}
+
+/// Bits por byte: la unidad honesta para un modelo byte-level, y comparable
+/// entre corpus y entre arquitecturas. La pérdida en nats no le dice nada a
+/// nadie.
+fn bits_per_byte(loss: f32) -> f32 {
+    loss / std::f32::consts::LN_2
 }
 
 pub fn generate_sample(model: &EvaModel, seq: usize, max: usize, rng: &mut crate::rng::Rng) -> Vec<usize> {

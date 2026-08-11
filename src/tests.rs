@@ -183,3 +183,33 @@ fn cm_sum(q: &Tensor, k: &Tensor, v: &Tensor, g: &Tensor, alpha: &Tensor, beta: 
     let t = ops::clockmem(&q.detach(), &k.detach(), &v.detach(), &g.detach(), &alpha.detach(), &beta.detach());
     t.data.iter().sum()
 }
+
+#[test]
+fn gradcheck_transpose_and_causal_softmax() {
+    // Las dos piezas que hicieron falta para armar la atención de contraste.
+    // Sin gradcheck no entran: una atención con el backward mal no falla, sólo
+    // aprende peor, y ahí la comparación con ClockMem miente a favor nuestro.
+    let mut x = param(vec![0.3, -1.2, 0.7, 2.1, -0.5, 0.9], vec![2, 3]);
+    gradcheck_unary("transpose", &mut x, ops::transpose);
+
+    let mut s = param(
+        vec![0.5, -0.3, 1.1, 0.2, -1.4, 0.8, 0.05, 1.7, -0.6, 0.33, 2.0, -0.9, 1.2, 0.4, -0.2, 0.65],
+        vec![4, 4],
+    );
+    gradcheck_unary("softmax_causal", &mut s, ops::softmax_causal);
+}
+
+#[test]
+fn causal_softmax_does_not_look_ahead() {
+    // La propiedad que hace causal a la atención. Si esto falla, el modelo lee
+    // el futuro y su pérdida es una mentira preciosa.
+    let x = param((0..16).map(|i| (i as f32) * 0.37 - 2.0).collect(), vec![4, 4]);
+    let y = ops::softmax_causal(&x);
+    for i in 0..4 {
+        for j in (i + 1)..4 {
+            assert_eq!(0.0, y.data[i * 4 + j], "la fila {i} miró la columna {j}");
+        }
+        let fila: f32 = (0..=i).map(|j| y.data[i * 4 + j]).sum();
+        assert!((fila - 1.0).abs() < 1e-6, "la fila {i} no suma 1: {fila}");
+    }
+}

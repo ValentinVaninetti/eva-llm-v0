@@ -240,6 +240,29 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
             push(0, ga);
             push(1, gb);
         }
+        "transpose" => {
+            let (r, c) = (n.saved_u[0], n.saved_u[1]);
+            // La transpuesta es su propia inversa: el gradiente vuelve dado
+            // vuelta y nada más.
+            push(0, crate::math::transpose(g, c, r));
+        }
+        "softmax_causal" => {
+            let s = n.saved_u[0];
+            let y = &n.saved_v[0];
+            let mut gx = vec![0.0; s * s];
+            for i in 0..s {
+                // dL/dx_j = y_j * (g_j - Σ_k g_k y_k), con la suma sólo sobre
+                // lo que la fila realmente mira.
+                let mut dot = 0.0;
+                for j in 0..=i {
+                    dot += g[i * s + j] * y[i * s + j];
+                }
+                for j in 0..=i {
+                    gx[i * s + j] = y[i * s + j] * (g[i * s + j] - dot);
+                }
+            }
+            push(0, gx);
+        }
         "silu" => {
             let x = &n.saved_v[0];
             let mut gx = vec![0.0; x.len()];

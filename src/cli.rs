@@ -25,7 +25,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn cmd_train(args: &[String]) -> Result<(), String> {
-    check_unknown(args, &["data", "dim", "ffn", "blocks", "kernel", "eps", "seq", "epochs", "lr", "wd", "seed", "log", "out", "resume"])?;
+    check_unknown(args, &["data", "dim", "ffn", "blocks", "kernel", "eps", "seq", "arch", "epochs", "lr", "wd", "seed", "log", "out", "resume", "val"])?;
     let data = flag(args, "data").ok_or("train requiere --data <archivo>")?;
     let mcfg = EvaConfig {
         vocab: 256,
@@ -35,6 +35,7 @@ fn cmd_train(args: &[String]) -> Result<(), String> {
         conv_kernel: flag_num(args, "kernel", 5)?,
         eps: flag_num(args, "eps", 1e-5)?,
         seq_len: flag_num(args, "seq", 64)?,
+        arch: crate::model::Arch::from_str(&flag(args, "arch").unwrap_or_else(|| "clock".into()))?,
     };
     let tcfg = TrainConfig {
         data_path: data,
@@ -45,6 +46,7 @@ fn cmd_train(args: &[String]) -> Result<(), String> {
         log_every: flag_num(args, "log", 20)?,
         out_path: flag(args, "out").unwrap_or_else(|| "eva.weights".to_string()),
         resume: flag(args, "resume"),
+        val_frac: flag_num(args, "val", 0.1)?,
     };
     train(&tcfg, &mcfg)
 }

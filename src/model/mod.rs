@@ -1,3 +1,4 @@
+pub mod attn;
 pub mod block;
 pub mod clock;
 
@@ -6,6 +7,45 @@ use crate::nn::{param, Embedding, Module, RMSNorm};
 use crate::rng::Rng;
 use crate::tensor::ops as ops;
 use crate::tensor::Tensor;
+
+/// Qué mezcla la información entre posiciones. Es la única diferencia entre
+/// las dos arquitecturas que sabe construir este archivo.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Arch {
+    /// EvaClock: estado recurrente de D con reloj por canal. O(S·D).
+    Clock,
+    /// Atención causal de una cabeza. O(S²). Está para comparar, no es la
+    /// dirección del proyecto.
+    Attn,
+}
+
+impl Arch {
+    pub fn from_str(s: &str) -> Result<Arch, String> {
+        match s {
+            "clock" => Ok(Arch::Clock),
+            "attn" | "attention" | "transformer" => Ok(Arch::Attn),
+            other => Err(format!("arquitectura desconocida: '{other}' (clock o attn)")),
+        }
+    }
+
+    pub fn as_u32(self) -> u32 {
+        match self {
+            Arch::Clock => 0,
+            Arch::Attn => 1,
+        }
+    }
+
+    pub fn from_u32(v: u32) -> Arch {
+        if v == 1 { Arch::Attn } else { Arch::Clock }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Arch::Clock => "clock",
+            Arch::Attn => "attn",
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct EvaConfig {
@@ -16,6 +56,7 @@ pub struct EvaConfig {
     pub conv_kernel: usize,
     pub eps: f32,
     pub seq_len: usize,
+    pub arch: Arch,
 }
 
 impl Default for EvaConfig {
@@ -28,6 +69,7 @@ impl Default for EvaConfig {
             conv_kernel: 5,
             eps: 1e-5,
             seq_len: 64,
+            arch: Arch::Clock,
         }
     }
 }
@@ -48,7 +90,7 @@ impl EvaModel {
         EvaModel {
             embed: Embedding::new(cfg.vocab, dim, &mut rng),
             blocks: (0..cfg.blocks)
-                .map(|_| EvaBlock::new(dim, cfg.ffn_dim, cfg.conv_kernel, cfg.eps, &mut rng))
+                .map(|_| EvaBlock::new(dim, cfg.ffn_dim, cfg.conv_kernel, cfg.eps, cfg.arch, &mut rng))
                 .collect(),
             norm_out: RMSNorm::new(dim, cfg.eps),
             head_w: param(

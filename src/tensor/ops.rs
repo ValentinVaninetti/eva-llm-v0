@@ -138,6 +138,45 @@ pub fn matmul(a: &Tensor, b: &Tensor) -> Tensor {
     finalize(&[a, b], "matmul", out, vec![m, n], vec![a.data.clone(), b.data.clone()], vec![], vec![m, k, n])
 }
 
+pub fn transpose(x: &Tensor) -> Tensor {
+    assert_eq!(x.shape.len(), 2, "transpose expects a 2D tensor");
+    let (r, c) = (x.shape[0], x.shape[1]);
+    let out = crate::math::transpose(&x.data, r, c);
+    finalize(&[x], "transpose", out, vec![c, r], vec![], vec![], vec![r, c])
+}
+
+/// Softmax por fila sobre el prefijo causal: la fila `i` sólo ve las columnas
+/// `0..=i`, y el resto queda en cero.
+///
+/// El enmascarado va ACÁ ADENTRO y no como un `-inf` sumado antes, por dos
+/// razones. Numérica: `exp(-inf)` en el borde da NaN apenas alguien resta el
+/// máximo. Y de costo: enmascarar afuera obliga a materializar una matriz SxS
+/// de `-inf` por capa y por paso, que es memoria y tráfico para representar
+/// "acá no mires".
+pub fn softmax_causal(x: &Tensor) -> Tensor {
+    assert_eq!(x.shape.len(), 2, "softmax_causal expects (S,S)");
+    let (s, n) = (x.shape[0], x.shape[1]);
+    assert_eq!(s, n, "softmax_causal expects a square score matrix");
+    let mut out = vec![0.0; s * s];
+    for i in 0..s {
+        let row = &x.data[i * s..i * s + i + 1];
+        // Restar el máximo antes de exponenciar: sin esto, logits grandes
+        // desbordan a inf y la fila entera sale NaN.
+        let mx = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let mut sum = 0.0;
+        for j in 0..=i {
+            let e = (x.data[i * s + j] - mx).exp();
+            out[i * s + j] = e;
+            sum += e;
+        }
+        let inv = 1.0 / sum;
+        for j in 0..=i {
+            out[i * s + j] *= inv;
+        }
+    }
+    finalize(&[x], "softmax_causal", out.clone(), x.shape.clone(), vec![out], vec![], vec![s])
+}
+
 pub fn silu(x: &Tensor) -> Tensor {
     let out: Vec<f32> = x.data.iter().map(|&v| v / (1.0 + (-v).exp())).collect();
     finalize(&[x], "silu", out, x.shape.clone(), vec![x.data.clone()], vec![], vec![])

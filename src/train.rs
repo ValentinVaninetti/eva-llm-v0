@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::data::TextDataset;
 use crate::model::{EvaConfig, EvaModel};
+use crate::nn::Module;
 use crate::optim::AdamW;
 use crate::save::{load_model, save_model};
 use crate::tensor::autograd::backward;
@@ -20,6 +21,8 @@ pub struct TrainConfig {
     pub val_frac: f32,
     /// Umbral de sorpresa. 0 = aprender de todo (la convención de hoy).
     pub surprise: f32,
+    /// Crédito local: cada bloque con su objetivo, sin gradiente que cruce.
+    pub local: bool,
 }
 
 pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
@@ -43,6 +46,22 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
     // forward: comparar corridas por "pasos" escondería justo lo que se quiere
     // medir.
     let (mut fwd, mut bwd) = (0usize, 0usize);
+
+    // Andamio de entrenamiento: una cabeza por bloque intermedio. No se
+    // guarda en el checkpoint, así la inferencia queda idéntica.
+    let mut heads = tcfg.local.then(|| {
+        crate::local::Heads::new(
+            model.blocks.len().saturating_sub(1),
+            mcfg.dim,
+            mcfg.vocab,
+            mcfg.eps,
+            &mut crate::rng::Rng::new(tcfg.seed ^ 0xC0FFEE),
+        )
+    });
+    if let Some(h) = &heads {
+        println!("eva: CRÉDITO LOCAL, ningún gradiente cruza de bloque a bloque");
+        println!("eva: {} params extra en cabezas auxiliares (andamio, no van al modelo)", h.count());
+    }
 
     let total_params = model.param_count();
     println!("eva: dataset {} bytes, {} windows, {} params",
@@ -74,17 +93,22 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
         for &wi in &order {
             let (input, target) = ds.window(wi);
 
-            let logits = model.forward(&input);
-            let loss = crate::tensor::ops::cross_entropy(&logits, &target);
-            let loss_v = loss.data[0];
-
             fwd += 1;
-            if gate.should_learn(loss_v) {
+            let loss_v = if let Some(h) = heads.as_mut() {
                 bwd += 1;
-                let grads = crate::prof::time(crate::prof::P::Backward, || backward(&loss));
-                let mut params = model.parameters_mut();
-                crate::prof::time(crate::prof::P::Optim, || opt.step(&mut params, &grads));
-            }
+                paso_local(&mut model, h, &mut opt, &input, &target)
+            } else {
+                let logits = model.forward(&input);
+                let loss = crate::tensor::ops::cross_entropy(&logits, &target);
+                let loss_v = loss.data[0];
+                if gate.should_learn(loss_v) {
+                    bwd += 1;
+                    let grads = crate::prof::time(crate::prof::P::Backward, || backward(&loss));
+                    let mut params = model.parameters_mut();
+                    crate::prof::time(crate::prof::P::Optim, || opt.step(&mut params, &grads));
+                }
+                loss_v
+            };
 
             running += loss_v;
             step += 1;
@@ -117,6 +141,7 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
     }
 
     save_model(&tcfg.out_path, &model).map_err(|e| format!("no se pudo guardar: {}", e))?;
+    println!("eva: pico de memoria del proceso {:.1} MB", crate::local::peak_rss_mb());
     if n_val > 0 {
         let vl = eval_loss(&model, &ds, n_train, n_windows);
         // EL NÚMERO CON EL QUE SE COMPARAN ARQUITECTURAS. La pérdida de
@@ -130,6 +155,60 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
     crate::prof::report(elapsed);
     println!("eva: entrenamiento terminado en {:.1}s, pesos en {}", elapsed.as_secs_f32(), tcfg.out_path);
     Ok(())
+}
+
+/// Un paso con crédito local. Devuelve la pérdida del ÚLTIMO bloque, que es la
+/// salida real del modelo y por lo tanto lo comparable con la línea base.
+///
+/// La clave está en el orden: cada bloque retropropaga, actualiza y **libera**
+/// antes de que empiece el siguiente. Sumar las pérdidas y hacer un backward
+/// al final daría los mismos gradientes y **ningún ahorro de memoria**, que es
+/// justamente lo único que se está tratando de comprar acá.
+fn paso_local(
+    model: &mut EvaModel,
+    heads: &mut crate::local::Heads,
+    opt: &mut AdamW,
+    input: &[usize],
+    target: &[usize],
+) -> f32 {
+    use crate::tensor::ops as ops;
+    let n = model.blocks.len();
+    let mut x = model.embed.embed(input);
+    let mut ultima = 0.0;
+
+    for i in 0..n {
+        let y = model.blocks[i].forward(&x);
+        let final_ = i + 1 == n;
+        let logits = if final_ {
+            ops::matmul(&model.norm_out.forward(&y), &model.head_w)
+        } else {
+            heads.logits(i, &y)
+        };
+        let loss = ops::cross_entropy(&logits, target);
+        if final_ {
+            ultima = loss.data[0];
+        }
+
+        let grads = crate::prof::time(crate::prof::P::Backward, || backward(&loss));
+
+        let mut params: Vec<&mut crate::tensor::Tensor> = Vec::new();
+        if i == 0 {
+            params.push(&mut model.embed.table);
+        }
+        params.extend(model.blocks[i].parameters_mut());
+        if final_ {
+            params.extend(model.norm_out.parameters_mut());
+            params.push(&mut model.head_w);
+        } else {
+            params.extend(heads.params_mut(i));
+        }
+        crate::prof::time(crate::prof::P::Optim, || opt.step(&mut params, &grads));
+
+        // `detach` es lo que corta el crédito: el bloque siguiente arranca de
+        // un tensor sin grafo detrás, así el de este bloque se libera acá.
+        x = y.detach();
+    }
+    ultima
 }
 
 /// Pérdida media sobre ventanas que el modelo nunca vio. Sin backward.

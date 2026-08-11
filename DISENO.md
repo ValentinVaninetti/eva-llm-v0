@@ -148,6 +148,61 @@ Conclusión que deja: *el problema no es de qué aprendemos, es que backprop hac
 que cada evento de aprendizaje cueste la red entera.* Ningún truco sobre los
 datos lo arregla.
 
+### MEDIDO: crédito local — pierde calidad, y el ahorro depende de la profundidad
+
+`src/local.rs`. Cada bloque con su propia cabeza de predicción y su propia
+pérdida; la entrada de cada bloque llega **desconectada** (hay un test que
+verifica que el gradiente no cruza el corte). Y cada bloque **retropropaga,
+actualiza y libera antes de que empiece el siguiente** -- sumar las pérdidas y
+hacer un backward al final daría los mismos gradientes y CERO ahorro, que es lo
+único que se está comprando.
+
+Config estándar (4 bloques, seq 64, 250 KB, 3 semillas):
+
+    global   1.8229   69.0 MB   319 s
+    local    1.8877   59.4 MB   358 s
+
+**Pierde: 3,6% de calidad, 12% más lento, y sólo 14% de memoria.** Los rangos
+no se solapan (1.8735-1.8974 contra 1.8135-1.8307): es peor de forma
+consistente. **A esta escala, backprop gana** -- exactamente lo que dice todo
+lo publicado.
+
+Pero el ahorro **crece con la profundidad y con el largo de secuencia**, que es
+donde la memoria realmente aprieta. Barrido con seq 256 y corpus mínimo:
+
+    bloques   global    local    ahorro
+       4      97.5 MB   67.2 MB    31%
+       8     185.9 MB  109.9 MB    41%
+      16     362.1 MB  200.0 MB    45%
+
+Descomponiendo los 12 bloques extra entre 4 y 16: unos **95 MB son inevitables
+en los dos modos** (más parámetros y más estado de AdamW, que no dependen del
+esquema de crédito). Lo que queda son activaciones: **~170 MB en global contra
+~29 MB en local**, un factor de casi seis.
+
+Tres advertencias que impiden cantar victoria:
+
+1. **El local no queda plano y debería.** Sospecho de la medición antes que del
+   método: `VmHWM` es marca de agua del *asignador*, no de memoria viva. Cada
+   bloque reserva y libera y el asignador no devuelve las páginas al sistema,
+   así que el pico acumula fragmentación aunque en cada instante haya un solo
+   bloque vivo. Si es eso, el beneficio real es MAYOR -- pero hasta medir
+   memoria viva, no se afirma.
+2. **Las cabezas auxiliares no son gratis**: 65 K parámetros por bloque
+   intermedio más su estado de AdamW. Con 16 bloques son ~12 MB de andamio. No
+   van al modelo final pero sí al costo de entrenar, y están contadas.
+3. **En régimen de pocos pasos el local es MUCHO más inestable**: con corpus
+   mínimo, rango entre semillas de 0.18 contra 0.047 del global. En la corrida
+   grande esa dispersión desaparece (0.024 contra 0.017), así que era del
+   régimen y no del método -- pero conviene recordarlo.
+
+**LO QUE DECIDE Y NO SABEMOS:** el costo de calidad a 4 bloques es 3,6%.
+¿Crece, se mantiene o se achica con la profundidad? Si se mantiene en ~3% con
+16 o 32 bloques, el intercambio se vuelve interesante porque ahí el ahorro es
+45% y subiendo. Si crece, el método no sirve. **Esa medición es la que hay que
+hacer y todavía no está hecha** -- el barrido de profundidad se hizo con corpus
+mínimo, donde el ruido tapa todo.
+
 ---
 
 ## Parte IV — Cómo aprende un animal, y qué de eso sirve
@@ -191,7 +246,7 @@ ser continuo y pasa a ser esporádico sobre un conjunto chico y curado.
 
 **A. Sorpresa — MEDIDA Y DESCARTADA.** Ver Parte III.
 
-**B. Crédito local: nunca sostener el grafo entero — PROPUESTO. La grande.**
+**B. Crédito local — MEDIDO, PIERDE A ESTA ESCALA. Ver Parte III.**
 Que cada bloque tenga su propio objetivo local y ningún gradiente cruce de un
 bloque a otro. La memoria de entrenamiento pasa de *profundidad × activaciones*
 a **un bloque por vez**: una red de N bloques se entrena con la memoria de uno.
@@ -281,6 +336,7 @@ semillas.
 | el cuello era ClockMem | el 0,8% del tiempo |
 | la atención estaba lisiada sin posiciones | dárselas la empeoró, 3 de 3 |
 | aprender por sorpresa iba a rendir | empata pagando 28% más |
+| el crédito local iba a ahorrar mucha memoria | 14% a 4 bloques, y cuesta 3,6% de calidad |
 
 Cuatro de cuatro en contra. **La evidencia indirecta sirve para elegir qué
 medir, nunca para concluir.** Y una convicción no se gradúa a hecho sin pasar

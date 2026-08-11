@@ -104,18 +104,19 @@ fn cmd_recall(args: &[String]) -> Result<(), String> {
     println!("modelo {} params | tabla {} entradas, ~{:.1} KB",
         model.param_count(), tabla.entries(), tabla.bytes() as f64 / 1024.0);
 
-    let evaluar = |desde: usize, hasta: usize, lambda: f32| -> f32 {
+    let evaluar = |desde: usize, hasta: usize, lambda: f32| -> (f32, f32) {
         let mut suma = 0.0;
         let mut cuenta = 0;
+        let mut cob = (0usize, 0usize);
         for wi in desde..hasta {
             let (input, target) = ds.window(wi);
             let logits = model.forward(&input);
             let antes: Vec<usize> = if wi == 0 { Vec::new() } else { ds.ids[..wi * seq].to_vec() };
             suma += crate::recall::mixed_loss(
-                &logits.data, model.cfg.vocab, &antes, &target, &tabla, lambda);
+                &logits.data, model.cfg.vocab, &antes, &target, &tabla, lambda, &mut cob);
             cuenta += 1;
         }
-        suma / cuenta as f32
+        (suma / cuenta as f32, 100.0 * cob.0 as f32 / cob.1.max(1) as f32)
     };
 
     // Barrido sobre DESARROLLO.
@@ -123,7 +124,7 @@ fn cmd_recall(args: &[String]) -> Result<(), String> {
     println!("  lambda   desarrollo");
     for paso in 0..=10 {
         let l = paso as f32 * 0.05;
-        let p = evaluar(fin_train, fin_dev, l);
+        let (p, _) = evaluar(fin_train, fin_dev, l);
         println!("   {l:.2}     {p:.4}");
         if p < mejor.1 {
             mejor = (l, p);
@@ -131,13 +132,23 @@ fn cmd_recall(args: &[String]) -> Result<(), String> {
     }
 
     // Y una sola pasada por VALIDACIÓN, con el lambda ya elegido.
-    let solo = evaluar(fin_dev, n, 0.0);
-    let con = evaluar(fin_dev, n, mejor.0);
+    let (solo, cobertura) = evaluar(fin_dev, n, 0.0);
+    let (con, _) = evaluar(fin_dev, n, mejor.0);
     let bpb = |x: f32| x / std::f32::consts::LN_2;
     println!("\nVALIDACIÓN (lambda {:.2} elegido en desarrollo)", mejor.0);
     println!("  modelo solo      {:.4}  |  {:.3} bits/byte", solo, bpb(solo));
     println!("  modelo + tabla   {:.4}  |  {:.3} bits/byte", con, bpb(con));
     println!("  mejora           {:.1}%", 100.0 * (solo - con) / solo);
+    // Si esto es casi 100%, el texto de prueba se parece demasiado al
+    // guardado y el resultado no se sostendría con texto nuevo.
+    println!("  la tabla tuvo algo que decir en el {cobertura:.1}% de las posiciones");
+    let perfil: Vec<String> = tabla
+        .hit_profile()
+        .iter()
+        .filter(|(_, p)| *p > 0.05)
+        .map(|(k, p)| format!("{k}:{p:.0}%"))
+        .collect();
+    println!("  de dónde vienen los aciertos: {}", perfil.join("  "));
     Ok(())
 }
 

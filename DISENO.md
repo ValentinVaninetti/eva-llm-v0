@@ -203,6 +203,48 @@ Tres advertencias que impiden cantar victoria:
 hacer y todavía no está hecha** -- el barrido de profundidad se hizo con corpus
 mínimo, donde el ruido tapa todo.
 
+### MEDIDO: la hipótesis central se sostiene a esta escala
+
+Modelo A: 2.767.108 parámetros. Modelo B: **1.413.433, la mitad**. La tabla:
+k-gramas exactos del texto de entrenamiento, **cero parámetros y cero
+entrenamiento**. Peso de mezcla elegido en desarrollo, reportado sobre
+validación que no se tocó hasta el final. Semilla 7:
+
+    A entero, solo                          1.8413   2.656 bits/byte
+    B mitad + tabla (todos los órdenes)     1.7262   2.490      -6,3% vs A
+    B mitad + tabla (sólo órdenes >= 6)     1.8152   2.619      -1,4% vs A
+
+**La mitad de los parámetros más una tabla tonta le gana al modelo entero.**
+
+Y la versión estricta importa más que el titular. La cobertura con todos los
+órdenes es 98,9%, lo que hizo sospechar que la tabla estaba haciendo de
+suavizador de n-gramas y no de recuperación -- un bigrama no es conocimiento,
+es estadística del idioma. El reparto de aciertos:
+
+    orden 8: 24%   orden 6: 25%   orden 4: 34%   orden 3: 12%   orden 2: 5%
+
+Casi la mitad viene de contextos de 6 y 8 bytes, que sí son específicos.
+Restringiendo la tabla a esos órdenes dispara sólo el 41% de las veces y la
+mejora baja de 8,2% a 3,4% -- pero **B + tabla estricta (1.8152) le sigue
+ganando a A solo (1.8413)**. O sea que el resultado no depende del suavizado
+genérico.
+
+**LA CUENTA QUE IMPORTA, que no es la de disco.** La tabla pesa 4,3 MB; A pesa
+11,1 MB en f32 y B 5,7 MB. En almacenamiento, B+tabla (10,0 MB) y A (11,1 MB)
+son casi lo mismo: **ahí no se gana nada**. Donde se gana es en lo que hay que
+LEER por token: A lee sus 11,1 MB enteros; B lee 5,7 MB más una consulta de
+hash de unos cien bytes. **La mitad del tráfico, con mejor calidad** -- y el
+tráfico es el cuello de la generación.
+
+Lo que esto **no** demuestra, y hay que decirlo:
+
+- Un k-grama captura patrones de superficie, no hechos. La hipótesis hablaba de
+  separar *hechos* de *razonamiento*; esto muestra el mecanismo (una consulta
+  puede reemplazar parámetros) sobre el caso más simple posible.
+- Entrenamiento y validación salen de los mismos documentos, así que comparten
+  mucho texto. Con material realmente nuevo la tabla ayudaría menos.
+- Una escala, una relación de tamaños, y hacen falta más semillas.
+
 ---
 
 ## Parte IV — Cómo aprende un animal, y qué de eso sirve

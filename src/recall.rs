@@ -41,6 +41,15 @@ const MIN_COUNT: u32 = 2;
 pub struct Recall {
     /// Una tabla por orden: contexto empaquetado -> (byte siguiente, veces).
     tables: Vec<HashMap<u64, Vec<(u8, u32)>>>,
+    /// Orden mínimo aceptado. Con 2 la tabla contesta casi siempre, pero un
+    /// bigrama NO es conocimiento: es estadística genérica del idioma. Subirlo
+    /// deja sólo los aciertos específicos, y sirve para separar "recuperar
+    /// algo puntual" de "suavizar con n-gramas", que son cosas distintas y dan
+    /// el mismo número si no se miran por separado.
+    min_order: usize,
+    /// Cuántas veces contestó cada orden, para poder mirar de dónde viene la
+    /// mejora en vez de suponerlo.
+    pub hits: std::cell::RefCell<[usize; ORDERS.len()]>,
 }
 
 fn pack(ctx: &[usize]) -> u64 {
@@ -67,7 +76,22 @@ impl Recall {
             }
             tables.push(t);
         }
-        Recall { tables }
+        let min_order = std::env::var("EVA_MIN_ORDER")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2);
+        Recall { tables, min_order, hits: std::cell::RefCell::new([0; ORDERS.len()]) }
+    }
+
+    /// Reparto de aciertos por orden de k-grama, en porcentaje.
+    pub fn hit_profile(&self) -> Vec<(usize, f32)> {
+        let h = self.hits.borrow();
+        let total: usize = h.iter().sum();
+        ORDERS
+            .iter()
+            .enumerate()
+            .map(|(i, &k)| (k, 100.0 * h[i] as f32 / total.max(1) as f32))
+            .collect()
     }
 
     /// Distribución del byte siguiente según la tabla, o `None` si no vio este
@@ -78,7 +102,7 @@ impl Recall {
     /// confiable; el retroceso es lo que evita quedarse mudo casi siempre.
     pub fn lookup(&self, ctx: &[usize], vocab: usize) -> Option<Vec<f32>> {
         for (ti, &k) in ORDERS.iter().enumerate() {
-            if ctx.len() < k {
+            if k < self.min_order || ctx.len() < k {
                 continue;
             }
             let key = pack(&ctx[ctx.len() - k..]);
@@ -87,6 +111,7 @@ impl Recall {
             if total < MIN_COUNT {
                 continue;
             }
+            self.hits.borrow_mut()[ti] += 1;
             let mut p = vec![0.0f32; vocab];
             let inv = 1.0 / total as f32;
             for &(b, c) in hits {
@@ -124,6 +149,7 @@ pub fn mixed_loss(
     targets: &[usize],
     table: &Recall,
     lambda: f32,
+    cobertura: &mut (usize, usize),
 ) -> f32 {
     let mut total = 0.0;
     for (t, &tgt) in targets.iter().enumerate() {
@@ -154,8 +180,13 @@ pub fn mixed_loss(
         };
         let _ = hasta;
 
-        if lambda > 0.0 {
-            if let Some(q) = table.lookup(&ctx, vocab) {
+        // Cobertura: cuántas veces la tabla tuvo algo que decir. Si es casi
+        // siempre, el corpus de prueba se parece demasiado al guardado y el
+        // resultado no se sostendría con texto nuevo.
+        cobertura.1 += 1;
+        if let Some(q) = table.lookup(&ctx, vocab) {
+            cobertura.0 += 1;
+            if lambda > 0.0 {
                 for (pi, qi) in p.iter_mut().zip(&q) {
                     *pi = (1.0 - lambda) * *pi + lambda * qi;
                 }
@@ -210,7 +241,8 @@ mod tests {
         let vocab = 4;
         let logits = vec![0.1, 2.0, -1.0, 0.5, 1.0, 0.0, 0.0, 0.0];
         let targets = vec![1usize, 0];
-        let con = mixed_loss(&logits, vocab, &[], &targets, &r, 0.0);
+        let mut cob = (0, 0);
+        let con = mixed_loss(&logits, vocab, &[], &targets, &r, 0.0, &mut cob);
 
         // A mano: -log softmax en la posición del objetivo.
         let mut esperado = 0.0;

@@ -18,6 +18,8 @@ pub struct TrainConfig {
     pub resume: Option<String>,
     /// Qué fracción de las ventanas se reserva para validar. 0 la apaga.
     pub val_frac: f32,
+    /// Umbral de sorpresa. 0 = aprender de todo (la convención de hoy).
+    pub surprise: f32,
 }
 
 pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
@@ -34,6 +36,13 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
     };
     let mut rng = crate::rng::Rng::new(tcfg.seed);
     let mut opt = AdamW::new(tcfg.lr, tcfg.wd);
+    // El calentamiento es una época corta: antes de eso la media móvil se
+    // calcularía con un modelo aleatorio y no significaría nada.
+    let mut gate = crate::learn::gate(tcfg.surprise, 200);
+    // Se cuentan por separado porque el backward cuesta el doble que el
+    // forward: comparar corridas por "pasos" escondería justo lo que se quiere
+    // medir.
+    let (mut fwd, mut bwd) = (0usize, 0usize);
 
     let total_params = model.param_count();
     println!("eva: dataset {} bytes, {} windows, {} params",
@@ -69,10 +78,13 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
             let loss = crate::tensor::ops::cross_entropy(&logits, &target);
             let loss_v = loss.data[0];
 
-            let grads = crate::prof::time(crate::prof::P::Backward, || backward(&loss));
-
-            let mut params = model.parameters_mut();
-            crate::prof::time(crate::prof::P::Optim, || opt.step(&mut params, &grads));
+            fwd += 1;
+            if gate.should_learn(loss_v) {
+                bwd += 1;
+                let grads = crate::prof::time(crate::prof::P::Backward, || backward(&loss));
+                let mut params = model.parameters_mut();
+                crate::prof::time(crate::prof::P::Optim, || opt.step(&mut params, &grads));
+            }
 
             running += loss_v;
             step += 1;
@@ -111,6 +123,8 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
         // entrenamiento sólo dice cuánto memorizó.
         println!("eva: VALIDACIÓN FINAL loss {:.4} | {:.3} bits/byte ({} ventanas, arch {})",
             vl, bits_per_byte(vl), n_windows - n_train, mcfg.arch.name());
+        println!("eva: regla '{}' | {} forward, {} backward ({:.0}% aprendidos)",
+            gate.name(), fwd, bwd, 100.0 * bwd as f32 / fwd.max(1) as f32);
     }
     let elapsed: Duration = t0.elapsed();
     crate::prof::report(elapsed);

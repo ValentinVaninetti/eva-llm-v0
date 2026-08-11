@@ -2,6 +2,7 @@ pub mod cli;
 pub mod data;
 pub mod gen;
 pub mod gpu;
+pub mod learn;
 pub mod math;
 pub mod model;
 pub mod nn;

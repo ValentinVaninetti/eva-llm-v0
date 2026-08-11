@@ -25,7 +25,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn cmd_train(args: &[String]) -> Result<(), String> {
-    check_unknown(args, &["data", "dim", "ffn", "blocks", "kernel", "eps", "seq", "arch", "epochs", "lr", "wd", "seed", "log", "out", "resume", "val"])?;
+    check_unknown(args, &["data", "dim", "ffn", "blocks", "kernel", "eps", "seq", "arch", "epochs", "lr", "wd", "seed", "log", "out", "resume", "val", "surprise"])?;
     let data = flag(args, "data").ok_or("train requiere --data <archivo>")?;
     let mcfg = EvaConfig {
         vocab: 256,
@@ -47,6 +47,7 @@ fn cmd_train(args: &[String]) -> Result<(), String> {
         out_path: flag(args, "out").unwrap_or_else(|| "eva.weights".to_string()),
         resume: flag(args, "resume"),
         val_frac: flag_num(args, "val", 0.1)?,
+        surprise: flag_num(args, "surprise", 0.0)?,
     };
     train(&tcfg, &mcfg)
 }

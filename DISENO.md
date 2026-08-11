@@ -208,11 +208,18 @@ mínimo, donde el ruido tapa todo.
 Modelo A: 2.767.108 parámetros. Modelo B: **1.413.433, la mitad**. La tabla:
 k-gramas exactos del texto de entrenamiento, **cero parámetros y cero
 entrenamiento**. Peso de mezcla elegido en desarrollo, reportado sobre
-validación que no se tocó hasta el final. Semilla 7:
+validación que no se tocó hasta el final. Tres semillas:
 
-    A entero, solo                          1.8413   2.656 bits/byte
-    B mitad + tabla (todos los órdenes)     1.7262   2.490      -6,3% vs A
-    B mitad + tabla (sólo órdenes >= 6)     1.8152   2.619      -1,4% vs A
+    semilla   A solo    B+tabla         B+tabla (>=6)
+       7      1.8413    1.7262  -6,3%   1.8152  -1,4%
+       8      1.8633    1.7360  -6,8%   1.8362  -1,5%
+       9      1.8705    1.7394  -7,0%   1.8453  -1,3%
+     media    1.8584    1.7339  -6,7%   1.8322  -1,4%
+
+Tres de tres en las dos versiones. Una precisión: en la versión estricta los
+rangos ABSOLUTOS se rozan entre semillas (el peor B+estricta, 1.8453, es peor
+que el mejor A, 1.8413). Lo que no se roza es la comparación **pareada**,
+dentro de cada semilla y con la misma inicialización: -1,4%, -1,5%, -1,3%.
 
 **La mitad de los parámetros más una tabla tonta le gana al modelo entero.**
 

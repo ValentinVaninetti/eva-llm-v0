@@ -1,9 +1,9 @@
 pub mod ffi;
 
+use std::cell::RefCell;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
 use std::ptr;
-use std::time::Instant;
 
 use ffi::*;
 
@@ -31,6 +31,14 @@ pub struct Gpu {
     pipeline_layout: VkPipelineLayout,
     pipeline: VkPipeline,
     desc_pool: VkDescriptorPool,
+    /// Allocated once. The pool has room for exactly one set: allocating per
+    /// call used to exhaust it, so the SECOND `matmul` of any process failed
+    /// with an out-of-pool error. Nothing exercised it because `eva gpu`
+    /// multiplied once and exited -- a training loop would have hit it
+    /// immediately.
+    ds: VkDescriptorSet,
+    /// Buffers that outlive the call that created them. See `Slot`.
+    cache: RefCell<Cache>,
 }
 
 struct Buffer {
@@ -45,6 +53,35 @@ impl Drop for Buffer {
             vkDestroyBuffer(self.device, self.buffer, ptr::null());
             vkFreeMemory(self.device, self.memory, ptr::null());
         }
+    }
+}
+
+/// One operand's staging + device pair, kept between calls.
+///
+/// WHY: every `matmul` used to create six buffers and six allocations and then
+/// free them all. A training loop repeats the same handful of shapes thousands
+/// of times, so the allocator was doing work that the second iteration already
+/// knew the answer to. These only ever grow, and shrink never -- the peak is
+/// bounded by the largest shape the model actually uses.
+struct Slot {
+    host: Buffer,
+    dev: Buffer,
+    bytes: usize,
+}
+
+#[derive(Default)]
+struct Cache {
+    a: Option<Slot>,
+    b: Option<Slot>,
+    c: Option<Slot>,
+}
+
+impl Cache {
+    /// Buffers must die before the device that owns them.
+    fn clear(&mut self) {
+        self.a = None;
+        self.b = None;
+        self.c = None;
     }
 }
 
@@ -180,6 +217,7 @@ impl Gpu {
             let pipeline_layout = create_pipeline_layout(device, ds_layout)?;
             let pipeline = create_pipeline(device, shader, pipeline_layout)?;
             let desc_pool = create_desc_pool(device)?;
+            let ds = alloc_ds(device, desc_pool, ds_layout)?;
 
             Ok(Gpu {
                 instance,
@@ -195,6 +233,8 @@ impl Gpu {
                 pipeline_layout,
                 pipeline,
                 desc_pool,
+                ds,
+                cache: RefCell::new(Cache::default()),
             })
         }
     }
@@ -204,19 +244,26 @@ impl Gpu {
     }
 
     pub fn matmul(&self, a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Result<Vec<f32>, String> {
-        let t0 = Instant::now();
-        let sa = self.host_buffer(a.len() * 4)?;
-        let sb = self.host_buffer(b.len() * 4)?;
-        let sc = self.host_buffer(m * n * 4)?;
-        self.write(&sa, a);
-        self.write(&sb, b);
+        let mut cache = self.cache.borrow_mut();
+        // `|` and not `||`: every slot must be checked, not short-circuited on
+        // the first one that already fit.
+        let grew = self.fit(&mut cache.a, a.len() * 4, BUFFER_USAGE_TRANSFER_DST_BIT)?
+            | self.fit(&mut cache.b, b.len() * 4, BUFFER_USAGE_TRANSFER_DST_BIT)?
+            | self.fit(&mut cache.c, m * n * 4, BUFFER_USAGE_TRANSFER_SRC_BIT)?;
 
-        let da = self.device_buffer(a.len() * 4, BUFFER_USAGE_TRANSFER_DST_BIT | BUFFER_USAGE_STORAGE_BUFFER_BIT)?;
-        let db = self.device_buffer(b.len() * 4, BUFFER_USAGE_TRANSFER_DST_BIT | BUFFER_USAGE_STORAGE_BUFFER_BIT)?;
-        let dc = self.device_buffer(m * n * 4, BUFFER_USAGE_TRANSFER_SRC_BIT | BUFFER_USAGE_STORAGE_BUFFER_BIT)?;
+        let (sa, da) = cache.a.as_ref().map(|s| (&s.host, &s.dev)).expect("slot a");
+        let (sb, db) = cache.b.as_ref().map(|s| (&s.host, &s.dev)).expect("slot b");
+        let (sc, dc) = cache.c.as_ref().map(|s| (&s.host, &s.dev)).expect("slot c");
 
-        let ds = self.alloc_ds()?;
-        self.bind_ds(ds, &da, &db, &dc)?;
+        // Only when the handles actually changed. The descriptor set is idle
+        // here: every call waits on its fence before returning.
+        if grew {
+            self.bind_ds(self.ds, da, db, dc)?;
+        }
+
+        self.write(sa, a);
+        self.write(sb, b);
+        let ds = self.ds;
 
         self.record(|cb| {
             unsafe {
@@ -227,7 +274,7 @@ impl Gpu {
                     PIPELINE_STAGE_TRANSFER_BIT,
                     ACCESS_HOST_WRITE_BIT,
                     ACCESS_TRANSFER_READ_BIT,
-                    &[&sa, &sb],
+                    &[sa, sb],
                 );
                 let region = VkBufferCopy { src_offset: 0, dst_offset: 0, size: (a.len() * 4) as u64 };
                 vkCmdCopyBuffer(cb, sa.buffer, da.buffer, 1, &region);
@@ -241,7 +288,7 @@ impl Gpu {
                     PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                     ACCESS_TRANSFER_WRITE_BIT,
                     ACCESS_SHADER_READ_BIT,
-                    &[&da, &db],
+                    &[da, db],
                 );
 
                 vkCmdBindPipeline(cb, PIPELINE_BIND_POINT_COMPUTE, self.pipeline);
@@ -266,7 +313,7 @@ impl Gpu {
                     PIPELINE_STAGE_TRANSFER_BIT,
                     ACCESS_SHADER_WRITE_BIT,
                     ACCESS_TRANSFER_READ_BIT,
-                    &[&dc],
+                    &[dc],
                 );
                 let region = VkBufferCopy { src_offset: 0, dst_offset: 0, size: (m * n * 4) as u64 };
                 vkCmdCopyBuffer(cb, dc.buffer, sc.buffer, 1, &region);
@@ -278,15 +325,32 @@ impl Gpu {
                     PIPELINE_STAGE_HOST_BIT,
                     ACCESS_TRANSFER_WRITE_BIT,
                     ACCESS_HOST_READ_BIT,
-                    &[&sc],
+                    &[sc],
                 );
             }
         })?;
 
-        let out = self.read(&sc, m * n);
-        let t = t0.elapsed();
-        eprintln!("eva gpu: matmul {}x{}x{} en {:.3}ms", m, k, n, t.as_secs_f64() * 1e3);
-        out
+        // Quien mide es el que llama: cronometrar acá adentro y volver a
+        // cronometrar afuera daba dos números distintos para lo mismo.
+        self.read(sc, m * n)
+    }
+
+    /// Makes sure the slot can hold `bytes`, allocating only when it must grow.
+    /// Returns whether the buffers changed, which is the only reason to rebind
+    /// the descriptor set.
+    fn fit(&self, slot: &mut Option<Slot>, bytes: usize, dev_usage: VkFlags) -> Result<bool, String> {
+        if slot.as_ref().is_some_and(|s| s.bytes >= bytes) {
+            return Ok(false);
+        }
+        // Dropped first, on purpose: the old buffers are idle (every call waits
+        // on its fence) and freeing before allocating keeps the peak down.
+        *slot = None;
+        *slot = Some(Slot {
+            host: self.host_buffer(bytes)?,
+            dev: self.device_buffer(bytes, dev_usage | BUFFER_USAGE_STORAGE_BUFFER_BIT)?,
+            bytes,
+        });
+        Ok(true)
     }
 
     fn record(&self, f: impl FnOnce(VkCommandBuffer)) -> Result<(), String> {
@@ -442,21 +506,6 @@ impl Gpu {
         }
     }
 
-    fn alloc_ds(&self) -> Result<VkDescriptorSet, String> {
-        unsafe {
-            let ai = VkDescriptorSetAllocateInfo {
-                s_type: STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                p_next: ptr::null(),
-                descriptor_pool: self.desc_pool,
-                descriptor_set_count: 1,
-                p_set_layouts: &self.ds_layout,
-            };
-            let mut ds: VkDescriptorSet = 0;
-            check(vkAllocateDescriptorSets(self.device, &ai, &mut ds), "vkAllocateDescriptorSets")?;
-            Ok(ds)
-        }
-    }
-
     fn bind_ds(&self, ds: VkDescriptorSet, a: &Buffer, b: &Buffer, c: &Buffer) -> Result<(), String> {
         unsafe {
             let infos = [
@@ -488,6 +537,10 @@ impl Drop for Gpu {
     fn drop(&mut self) {
         unsafe {
             vkDeviceWaitIdle(self.device);
+            // ANTES de destruir el device. Los campos se dropean después de
+            // este cuerpo, así que los buffers del caché llamarían a
+            // vkDestroyBuffer sobre un device ya destruido.
+            self.cache.borrow_mut().clear();
             vkDestroyPipeline(self.device, self.pipeline, ptr::null());
             vkDestroyPipelineLayout(self.device, self.pipeline_layout, ptr::null());
             vkDestroyDescriptorSetLayout(self.device, self.ds_layout, ptr::null());
@@ -650,6 +703,25 @@ fn create_pipeline(
     }
 }
 
+fn alloc_ds(
+    device: VkDevice,
+    pool: VkDescriptorPool,
+    layout: VkDescriptorSetLayout,
+) -> Result<VkDescriptorSet, String> {
+    unsafe {
+        let ai = VkDescriptorSetAllocateInfo {
+            s_type: STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            p_next: ptr::null(),
+            descriptor_pool: pool,
+            descriptor_set_count: 1,
+            p_set_layouts: &layout,
+        };
+        let mut ds: VkDescriptorSet = 0;
+        check(vkAllocateDescriptorSets(device, &ai, &mut ds), "vkAllocateDescriptorSets")?;
+        Ok(ds)
+    }
+}
+
 fn create_desc_pool(device: VkDevice) -> Result<VkDescriptorPool, String> {
     unsafe {
         let size = VkDescriptorPoolSize {
@@ -675,5 +747,79 @@ fn check(result: VkResult, what: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("{} falló con VkResult {}", what, result))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Multiplica en CPU, para contrastar. Deliberadamente la versión tonta:
+    /// si el contraste usara el mismo código que se está probando, no probaría
+    /// nada.
+    fn reference(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+        let mut c = vec![0.0f32; m * n];
+        for i in 0..m {
+            for p in 0..k {
+                let av = a[i * k + p];
+                for j in 0..n {
+                    c[i * n + j] += av * b[p * n + j];
+                }
+            }
+        }
+        c
+    }
+
+    fn ramp(len: usize, seed: f32) -> Vec<f32> {
+        (0..len).map(|i| ((i as f32 * 0.017 + seed).sin())).collect()
+    }
+
+    /// Necesita una GPU con Vulkan, así que no corre en la suite normal:
+    ///     cargo test --release -- --ignored gpu
+    #[test]
+    #[ignore = "necesita una GPU con Vulkan"]
+    fn reused_buffers_survive_changing_shapes() {
+        let gpu = match Gpu::init() {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("sin GPU utilizable ({e}); nada que probar");
+                return;
+            }
+        };
+
+        // El orden importa: crece, se queda igual, y ACHICA. Si el caché
+        // devolviera el buffer grande sin respetar la forma nueva, o si el
+        // descriptor set quedara apuntando a los buffers viejos, el que falla
+        // es alguno de estos tres, no el primero.
+        for (m, k, n) in [(32, 48, 16), (64, 96, 80), (64, 96, 80), (16, 8, 24), (40, 40, 40)] {
+            let a = ramp(m * k, 0.3);
+            let b = ramp(k * n, 1.1);
+            let got = gpu.matmul(&a, &b, m, k, n).expect("matmul en GPU");
+            let want = reference(&a, &b, m, k, n);
+
+            assert_eq!(want.len(), got.len(), "largo distinto en {m}x{k}x{n}");
+            let worst = got.iter().zip(&want).fold(0.0f32, |w, (x, y)| w.max((x - y).abs()));
+            assert!(worst < 1e-3, "{m}x{k}x{n} difiere del reference en {worst:.2e}");
+        }
+    }
+
+    /// La segunda llamada de cualquier proceso fallaba: el descriptor pool
+    /// tenía lugar para un set y se alocaba uno por llamada.
+    #[test]
+    #[ignore = "necesita una GPU con Vulkan"]
+    fn many_calls_do_not_exhaust_the_descriptor_pool() {
+        let gpu = match Gpu::init() {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("sin GPU utilizable ({e}); nada que probar");
+                return;
+            }
+        };
+        let (m, k, n) = (24, 24, 24);
+        let a = ramp(m * k, 0.7);
+        let b = ramp(k * n, 2.3);
+        for i in 0..64 {
+            gpu.matmul(&a, &b, m, k, n).unwrap_or_else(|e| panic!("llamada {i} falló: {e}"));
+        }
     }
 }

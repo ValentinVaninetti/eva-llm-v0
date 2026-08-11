@@ -76,10 +76,11 @@ fn cmd_info(args: &[String]) -> Result<(), String> {
 }
 
 fn cmd_gpu(args: &[String]) -> Result<(), String> {
-    check_unknown(args, &["m", "k", "n"])?;
+    check_unknown(args, &["m", "k", "n", "iters"])?;
     let m = flag_num(args, "m", 512)?;
     let k = flag_num(args, "k", 512)?;
     let n = flag_num(args, "n", 512)?;
+    let iters = flag_num(args, "iters", 20)?;
 
     let gpu = Gpu::init()?;
     let info = gpu.info();
@@ -96,30 +97,66 @@ fn cmd_gpu(args: &[String]) -> Result<(), String> {
     let a: Vec<f32> = (0..m * k).map(|_| rng.uniform(-1.0, 1.0)).collect();
     let b: Vec<f32> = (0..k * n).map(|_| rng.uniform(-1.0, 1.0)).collect();
 
-    let t0 = std::time::Instant::now();
-    let c = gpu.matmul(&a, &b, m, k, n)?;
-    let t_gpu = t0.elapsed();
+    // La primera llamada carga con la creación de los buffers; el resto es lo
+    // que ve un entrenamiento, que multiplica las mismas formas miles de veces.
+    // Medir una sola vez mezclaba las dos cosas en un número que no era ninguna.
+    let mut c = Vec::new();
+    let (gpu_frio, gpu_regimen) = timed(iters, || {
+        c = gpu.matmul(&a, &b, m, k, n)?;
+        Ok(())
+    })?;
 
-    let t0 = std::time::Instant::now();
     let mut cref = vec![0.0f32; m * n];
-    crate::math::matmul(&a, &b, m, k, n, &mut cref);
-    let t_cpu = t0.elapsed();
+    let (_, cpu_regimen) = timed(iters, || {
+        crate::math::matmul(&a, &b, m, k, n, &mut cref);
+        Ok(())
+    })?;
 
-    let mut max_err = 0.0f32;
-    for i in 0..m * n {
-        max_err = max_err.max((c[i] - cref[i]).abs());
-    }
-    println!("matmul {}x{}x{}: GPU {:.3}ms | CPU {:.3}ms | max_err {:.2e}",
-        m, k, n,
-        t_gpu.as_secs_f64() * 1e3,
-        t_cpu.as_secs_f64() * 1e3,
-        max_err,
+    let max_err = c.iter().zip(&cref).fold(0.0f32, |w, (x, y)| w.max((x - y).abs()));
+    println!(
+        "matmul {m}x{k}x{n} ({iters} corridas)\n  \
+         GPU  {:7.3} ms  (primera {:7.3} ms, con la creación de buffers)\n  \
+         CPU  {:7.3} ms\n  \
+         max_err {max_err:.2e}",
+        ms(gpu_regimen),
+        ms(gpu_frio),
+        ms(cpu_regimen),
     );
     if max_err > 1e-2 {
-        return Err(format!("el matmul de GPU difiere del CPU: max_err {:.2e}", max_err));
+        return Err(format!("el matmul de GPU difiere del CPU: max_err {max_err:.2e}"));
     }
-    println!("OK: el backend Vulkan produce resultados correctos.");
+    let (rapido, lento, veces) = if gpu_regimen < cpu_regimen {
+        ("GPU", "CPU", ms(cpu_regimen) / ms(gpu_regimen))
+    } else {
+        ("CPU", "GPU", ms(gpu_regimen) / ms(cpu_regimen))
+    };
+    println!("OK: resultados correctos. En régimen gana {rapido} por {veces:.2}x sobre {lento}.");
     Ok(())
+}
+
+fn ms(d: std::time::Duration) -> f64 {
+    d.as_secs_f64() * 1e3
+}
+
+/// Corre `f` `iters` veces y devuelve (la primera, el promedio del resto).
+///
+/// Separarlas es el punto: la primera incluye todo lo que se paga una sola vez
+/// y promediarla adentro esconde justamente lo que se quiere ver.
+fn timed(
+    iters: usize,
+    mut f: impl FnMut() -> Result<(), String>,
+) -> Result<(std::time::Duration, std::time::Duration), String> {
+    let t0 = std::time::Instant::now();
+    f()?;
+    let primera = t0.elapsed();
+    if iters <= 1 {
+        return Ok((primera, primera));
+    }
+    let t0 = std::time::Instant::now();
+    for _ in 1..iters {
+        f()?;
+    }
+    Ok((primera, t0.elapsed() / (iters - 1) as u32))
 }
 
 fn flag(args: &[String], name: &str) -> Option<String> {

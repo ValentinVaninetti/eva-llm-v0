@@ -252,6 +252,42 @@ Lo que esto **no** demuestra, y hay que decirlo:
   mucho texto. Con material realmente nuevo la tabla ayudaría menos.
 - Una escala, una relación de tamaños, y hacen falta más semillas.
 
+### MEDIDO Y NEGATIVO: el estado que no se reinicia
+
+La idea: el estado de ClockMem es de tamaño fijo y tiene olvido propio, así que
+no hay razón técnica para reiniciarlo en cada ventana. Reiniciar es herencia
+del transformer, donde el contexto ES la ventana. Dejarlo correr daría memoria
+más allá de la ventana **sin un byte extra**, y es algo que un transformer no
+puede copiar porque su caché crecería.
+
+Semilla 7, y con el control pareado que hace falta -- persistir OBLIGA a
+recorrer en orden, así que hay que comparar contra "en orden sin estado" y no
+contra la línea base barajada:
+
+    condición                  reloj    val limpio   val heredado   magnitud
+    barajado (línea base)     0.9999      1.8245          -             -
+    en orden, sin estado      0.9999      1.9772          -             -
+    en orden, CON estado      0.9999      2.2131        2.1580       880.69
+    en orden, sin estado      0.999       1.9782          -             -
+    en orden, CON estado      0.999       1.9931        1.9917        27.21
+
+**No ayuda.** Contra su control pareado queda 0,75% peor: neutro tirando a
+levemente negativo.
+
+Pero la primera corrida daba 11,9% peor, y eso **no era evidencia sobre la
+idea**: era saturación. `log_clock` se inicializaba con alpha hasta 0.9999, y
+un canal que casi no olvida acumula ~10.000 términos. Dentro de una ventana de
+64 tokens es inofensivo; a lo largo de 224.000 tokens el estado llegó a **880**
+de magnitud. Con techo en 0.999 (memoria efectiva ~1000 tokens, quince veces la
+ventana) baja a 27 y la pérdida se recupera casi entera.
+
+**LO QUE SALIÓ DE ACÁ Y VALE MÁS QUE EL EXPERIMENTO: barajar cuesta 8,4%**
+(1.8245 contra 1.9772). Persistir estado obliga a ir en orden, así que
+cualquier esquema con memoria entre ventanas arrastra esa mochila antes de
+empezar. **El costo de la memoria persistente no es el estado: es perder el
+barajado.** Eso vale para cualquier variante futura -- memoria rápida,
+consolidación, lo que sea que necesite continuidad temporal.
+
 ---
 
 ## Parte IV — Cómo aprende un animal, y qué de eso sirve
@@ -377,7 +413,7 @@ Y conviene separar dos afirmaciones que se venían tratando como una:
 Nada entra sin medición contra la línea base, con validación held-out y varias
 semillas.
 
-**Marcador de la intuición en este proyecto: 0 de 4.**
+**Marcador de la intuición en este proyecto: 0 de 6.**
 
 | creí que | era |
 |---|---|
@@ -386,6 +422,7 @@ semillas.
 | la atención estaba lisiada sin posiciones | dárselas la empeoró, 3 de 3 |
 | aprender por sorpresa iba a rendir | empata pagando 28% más |
 | el crédito local iba a ahorrar mucha memoria | 14% a 4 bloques, y cuesta 3,6% de calidad |
+| el estado persistente daría memoria gratis | neutro, y obliga a perder el barajado (-8,4%) |
 
 Cuatro de cuatro en contra. **La evidencia indirecta sirve para elegir qué
 medir, nunca para concluir.** Y una convicción no se gradúa a hecho sin pasar

@@ -20,7 +20,16 @@ impl ClockMem {
             wv: Linear::new(d, d, rng),
             wg: Linear::new(d, d, rng),
             log_clock: {
-                let a_max = 0.9999f32;
+                // TECHO DEL RELOJ. Con 0.9999 un canal olvida tan despacio que
+                // acumula ~10.000 términos: dentro de una ventana de 64 tokens
+                // es inofensivo, pero con estado persistente a lo largo del
+                // corpus SATURA -- medido, la magnitud del estado llegó a 881.
+                // Con 0.999 la memoria efectiva es de ~1000 tokens, quince
+                // veces la ventana, que es justo lo que se quiere sin explotar.
+                let a_max = std::env::var("EVA_ALPHA_MAX")
+                    .ok()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(0.9999);
                 let a_min = 0.01f32;
                 let logits: Vec<f32> = (0..d)
                     .map(|i| {
@@ -33,6 +42,19 @@ impl ClockMem {
             },
             beta: param(vec![1.0], vec![1]),
         }
+    }
+}
+
+impl ClockMem {
+    /// Igual que `forward`, arrancando del estado que dejó la ventana anterior
+    /// y devolviendo el que queda para la siguiente.
+    pub fn forward_from(&self, x: &Tensor, s0: &[f32]) -> (Tensor, Vec<f32>) {
+        let q = self.wq.forward(x);
+        let k = self.wk.forward(x);
+        let v = self.wv.forward(x);
+        let g = ops::sigmoid(&self.wg.forward(x));
+        let alpha = ops::sigmoid(&self.log_clock);
+        ops::clockmem_from(&q, &k, &v, &g, &alpha, &self.beta, s0)
     }
 }
 

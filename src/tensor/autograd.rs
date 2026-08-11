@@ -389,6 +389,7 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
             let gg = &n.saved_v[3];
             let state = &n.saved_v[4];
             let alpha = &n.saved_v[5];
+            let s0 = &n.saved_v[6];
             let mut gq = vec![0.0; s * d];
             let mut gk = vec![0.0; s * d];
             let mut gv = vec![0.0; s * d];
@@ -406,7 +407,11 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
                     gs[c] += go * q[t * d + c] * gg[t * d + c];
                 }
                 for c in 0..d {
-                    let prev_state = if t == 0 { 0.0 } else { state[(t - 1) * d + c] };
+                    // En t=0 el estado previo es el que vino de la ventana
+                    // anterior, no cero. Si esto quedara en 0.0 con estado
+                    // persistente, el gradiente de alpha sería incorrecto
+                    // justo en el borde entre ventanas -- y no fallaría nada.
+                    let prev_state = if t == 0 { s0[c] } else { state[(t - 1) * d + c] };
                     ga[c] += gs[c] * prev_state;
                     gb += gs[c] * k[t * d + c] * v[t * d + c];
                     gk[t * d + c] += gs[c] * beta * v[t * d + c];

@@ -273,12 +273,38 @@ pub fn clockmem(
     alpha: &Tensor,
     beta: &Tensor,
 ) -> Tensor {
+    let d = q.shape[1];
+    clockmem_from(q, k, v, g, alpha, beta, &vec![0.0; d]).0
+}
+
+/// Igual, pero arrancando de un estado dado y devolviendo el estado final.
+///
+/// POR QUÉ EXISTE: el estado de ClockMem es de tamaño fijo y tiene su propio
+/// olvido por canal, así que **no hay ninguna razón técnica para reiniciarlo
+/// en cada ventana**. Reiniciar es una herencia del transformer, donde el
+/// contexto ES la ventana y no queda otra. Acá, dejarlo correr da memoria más
+/// allá de la ventana **sin un byte extra de costo**.
+///
+/// `s0` entra como CONSTANTE: el gradiente no vuelve por ahí. Eso es
+/// truncated BPTT, y es a propósito -- propagar hacia atrás por todo el corpus
+/// significaría sostener el grafo de todo el corpus, que es exactamente lo que
+/// no se quiere.
+pub fn clockmem_from(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    g: &Tensor,
+    alpha: &Tensor,
+    beta: &Tensor,
+    s0: &[f32],
+) -> (Tensor, Vec<f32>) {
     let (s, d) = (q.shape[0], q.shape[1]);
+    assert_eq!(s0.len(), d, "el estado inicial no tiene D elementos");
     let beta_v = beta.data[0];
     let mut state = vec![0.0; s * d];
     let mut out = vec![0.0; s * d];
+    let mut cur = s0.to_vec();
     crate::prof::time(crate::prof::P::ClockFwd, || {
-        let mut cur = vec![0.0; d];
         for t in 0..s {
             for c in 0..d {
                 cur[c] = alpha.data[c] * cur[c] + beta_v * k.data[t * d + c] * v.data[t * d + c];
@@ -289,7 +315,8 @@ pub fn clockmem(
             }
         }
     });
-    finalize(
+    let final_state = cur;
+    let t = finalize(
         &[q, k, v, g, alpha, beta],
         "clockmem",
         out,
@@ -301,8 +328,10 @@ pub fn clockmem(
             g.data.clone(),
             state,
             alpha.data.clone(),
+            s0.to_vec(),
         ],
         vec![beta_v],
         vec![s, d],
-    )
+    );
+    (t, final_state)
 }

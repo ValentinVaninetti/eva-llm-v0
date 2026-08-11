@@ -23,6 +23,12 @@ pub struct TrainConfig {
     pub surprise: f32,
     /// Crédito local: cada bloque con su objetivo, sin gradiente que cruce.
     pub local: bool,
+    /// El estado de ClockMem no se reinicia entre ventanas.
+    pub persist: bool,
+    /// Recorrer el corpus en orden sin persistir estado. Es el CONTROL de
+    /// `--persist`: sin esto se compararían dos cambios a la vez, el orden y
+    /// la memoria, y no se sabría cuál produjo la diferencia.
+    pub inorder: bool,
 }
 
 pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
@@ -88,8 +94,19 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
     let t0 = Instant::now();
     let mut last_log = Instant::now();
 
+    // CON ESTADO PERSISTENTE HAY QUE IR EN ORDEN. Barajar llenaría el estado
+    // con contexto de un documento que no tiene nada que ver con el siguiente:
+    // eso no es memoria, es ruido. Y como el orden también afecta al
+    // entrenamiento, la línea base para comparar tiene que correr en orden
+    // igual -- si no, se estarían comparando dos cosas a la vez.
+    let mut estados = model.fresh_states();
+
     for epoch in 0..tcfg.epochs {
-        let order = ds.shuffled_train_indices(n_train, &mut rng);
+        let order: Vec<usize> = if tcfg.persist || tcfg.inorder {
+            (0..n_train).collect()
+        } else {
+            ds.shuffled_train_indices(n_train, &mut rng)
+        };
         for &wi in &order {
             let (input, target) = ds.window(wi);
 
@@ -98,7 +115,11 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
                 bwd += 1;
                 paso_local(&mut model, h, &mut opt, &input, &target)
             } else {
-                let logits = model.forward(&input);
+                let logits = if tcfg.persist {
+                    model.forward_carrying(&input, &mut estados)
+                } else {
+                    model.forward(&input)
+                };
                 let loss = crate::tensor::ops::cross_entropy(&logits, &target);
                 let loss_v = loss.data[0];
                 if gate.should_learn(loss_v) {
@@ -143,7 +164,16 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
     save_model(&tcfg.out_path, &model).map_err(|e| format!("no se pudo guardar: {}", e))?;
     println!("eva: pico de memoria del proceso {:.1} MB", crate::local::peak_rss_mb());
     if n_val > 0 {
+        // Con estado limpio: comparable con cualquier corrida.
         let vl = eval_loss(&model, &ds, n_train, n_windows);
+        if tcfg.persist {
+            // Y con el estado que viene del texto anterior, que es la ventaja
+            // que se está probando. Van SEPARADOS: mezclarlos sería cantar
+            // victoria por una diferencia que no es la que se cree.
+            let vp = eval_loss_carrying(&model, &ds, n_train, n_windows);
+            println!("eva: validación con estado heredado {:.4} | {:.3} bits/byte",
+                vp, bits_per_byte(vp));
+        }
         // EL NÚMERO CON EL QUE SE COMPARAN ARQUITECTURAS. La pérdida de
         // entrenamiento sólo dice cuánto memorizó.
         println!("eva: VALIDACIÓN FINAL loss {:.4} | {:.3} bits/byte ({} ventanas, arch {})",
@@ -219,6 +249,29 @@ fn eval_loss(model: &EvaModel, ds: &TextDataset, from: usize, to: usize) -> f32 
         let logits = model.forward(&input);
         sum += crate::tensor::ops::cross_entropy(&logits, &target).data[0];
     }
+    sum / (to - from) as f32
+}
+
+/// Como `eval_loss`, pero dejando correr el estado de una ventana a la otra:
+/// el examen se toma con la memoria que el texto anterior dejó.
+fn eval_loss_carrying(model: &EvaModel, ds: &TextDataset, from: usize, to: usize) -> f32 {
+    let mut estados = model.fresh_states();
+    let mut sum = 0.0;
+    let mut pico = 0.0f32;
+    for wi in from..to {
+        let (input, target) = ds.window(wi);
+        let logits = model.forward_carrying(&input, &mut estados);
+        sum += crate::tensor::ops::cross_entropy(&logits, &target).data[0];
+        for e in estados.iter() {
+            for v in e {
+                pico = pico.max(v.abs());
+            }
+        }
+    }
+    // Si esto es enorme, los canales lentos (alpha cerca de 1) están
+    // acumulando sin olvidar y el estado saturó: el problema sería la
+    // inicialización del reloj, no la idea de persistir.
+    println!("eva: magnitud máxima del estado heredado: {pico:.2}");
     sum / (to - from) as f32
 }
 

@@ -227,3 +227,68 @@ fn gradcheck_slice_rows() {
     };
     assert_eq!(vec![0.0; 6], g[6..].to_vec(), "llegó gradiente a filas que no se usaron");
 }
+
+#[test]
+fn gradcheck_clockmem_with_carried_state() {
+    // El caso que el gradcheck de siempre NO cubre: arrancar de un estado que
+    // viene de la ventana anterior. En t=0 el "estado previo" ya no es cero, y
+    // de eso depende el gradiente de alpha. Si eso quedara mal, alpha
+    // aprendería sesgado en el borde de cada ventana -- y nada fallaría: el
+    // modelo entrenaría igual, sólo que peor, y sin decir por qué.
+    let (s, d) = (5, 3);
+    let mut q = param((0..s * d).map(|i| (i as f32 - 7.0) / 10.0).collect(), vec![s, d]);
+    let mut k = param((0..s * d).map(|i| (i as f32 * 1.7 - 4.0) / 11.0).collect(), vec![s, d]);
+    let mut v = param((0..s * d).map(|i| (i as f32 * -0.9 + 2.0) / 8.0).collect(), vec![s, d]);
+    let mut g = param((0..s * d).map(|i| ((i % 3) as f32 - 1.0) / 4.0).collect(), vec![s, d]);
+    let mut alpha = param(vec![0.35, 0.6, 0.15], vec![d]);
+    let mut beta = param(vec![0.9], vec![1]);
+    // Un estado inicial bien distinto de cero: si el backward lo ignorara, la
+    // diferencia se vería justo acá.
+    let s0 = vec![0.8, -1.3, 0.45];
+
+    let corrida = |a: &Tensor, b: &Tensor, qq: &Tensor, kk: &Tensor, vv: &Tensor, gg: &Tensor| {
+        ops::clockmem_from(qq, kk, vv, gg, a, b, &s0).0
+    };
+
+    let out = corrida(&alpha, &beta, &q, &k, &v, &g);
+    let grads = backward(&ops::sum_all(&out));
+    let ga = grads.get(&alpha.id).cloned().unwrap();
+    let gb = grads.get(&beta.id).cloned().unwrap();
+    let gq = grads.get(&q.id).cloned().unwrap();
+
+    let na = numeric(&mut alpha, |p| {
+        sum_of(&ops::clockmem_from(&q.detach(), &k.detach(), &v.detach(), &g.detach(), p, &beta.detach(), &s0).0)
+    }, 1e-3);
+    let nb = numeric(&mut beta, |p| {
+        sum_of(&ops::clockmem_from(&q.detach(), &k.detach(), &v.detach(), &g.detach(), &alpha.detach(), p, &s0).0)
+    }, 1e-3);
+    let nq = numeric(&mut q, |p| {
+        sum_of(&ops::clockmem_from(p, &k.detach(), &v.detach(), &g.detach(), &alpha.detach(), &beta.detach(), &s0).0)
+    }, 1e-3);
+
+    check(&ga, &na, "alpha con estado heredado");
+    check(&gb, &nb, "beta con estado heredado");
+    check(&gq, &nq, "q con estado heredado");
+}
+
+#[test]
+fn a_carried_state_actually_changes_the_output() {
+    // Control de que el estado inicial NO se esté ignorando en silencio. Sin
+    // esto, un `clockmem_from` que descartara s0 pasaría el gradcheck (el
+    // gradiente sería consistente con lo que calcula) y daría resultados
+    // idénticos al de siempre sin que nadie lo note.
+    let (s, d) = (4, 3);
+    let q = param(vec![1.0; s * d], vec![s, d]);
+    let k = param(vec![0.5; s * d], vec![s, d]);
+    let v = param(vec![0.5; s * d], vec![s, d]);
+    let g = param(vec![1.0; s * d], vec![s, d]);
+    let alpha = param(vec![0.9, 0.9, 0.9], vec![d]);
+    let beta = param(vec![1.0], vec![1]);
+
+    let (cero, _) = ops::clockmem_from(&q, &k, &v, &g, &alpha, &beta, &vec![0.0; d]);
+    let (con, fin) = ops::clockmem_from(&q, &k, &v, &g, &alpha, &beta, &vec![2.0; d]);
+
+    assert!(cero.data[0] != con.data[0], "el estado inicial se está ignorando");
+    // Y el estado final tiene que salir distinto de cero para poder encadenar.
+    assert!(fin.iter().all(|v| *v != 0.0), "no devolvió estado final utilizable");
+}

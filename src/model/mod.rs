@@ -133,6 +133,33 @@ impl EvaModel {
         ops::matmul(&x, &self.head_w)
     }
 
+    /// Pasada llevando el estado de ClockMem de una ventana a la siguiente.
+    ///
+    /// `states` entra con lo que dejó la ventana anterior y sale con lo que le
+    /// deja a la próxima. Son D números por bloque, de tamaño fijo: por eso
+    /// esto es gratis y un caché de atención no lo sería.
+    pub fn forward_carrying(&self, ids: &[usize], states: &mut [Vec<f32>]) -> Tensor {
+        let mut x = self.embed.embed(ids);
+        if let Some(pos) = &self.pos {
+            let n = ids.len().min(self.cfg.seq_len);
+            x = ops::add(&x, &ops::slice_rows(pos, n));
+        }
+        for (i, b) in self.blocks.iter().enumerate() {
+            let (y, fin) = b.forward_from(&x, Some(&states[i]));
+            x = y;
+            if let Some(f) = fin {
+                states[i] = f;
+            }
+        }
+        let x = self.norm_out.forward(&x);
+        ops::matmul(&x, &self.head_w)
+    }
+
+    /// Estados en cero, uno por bloque.
+    pub fn fresh_states(&self) -> Vec<Vec<f32>> {
+        vec![vec![0.0; self.cfg.dim]; self.blocks.len()]
+    }
+
     pub fn parameters(&self) -> Vec<&Tensor> {
         let mut out = Vec::new();
         out.push(&self.embed.table);

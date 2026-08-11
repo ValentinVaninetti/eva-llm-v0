@@ -13,6 +13,22 @@ pub enum Mixer {
     Attn(Attention),
 }
 
+impl Mixer {
+    /// Devuelve el estado final sólo si el mezclador tiene estado de tamaño
+    /// fijo. La atención devuelve `None` a propósito: su "estado" es un caché
+    /// que crece con el contexto, así que encadenarlo entre ventanas no sería
+    /// gratis y la comparación dejaría de ser justa.
+    pub fn forward_from(&self, x: &Tensor, s0: Option<&[f32]>) -> (Tensor, Option<Vec<f32>>) {
+        match (self, s0) {
+            (Mixer::Clock(m), Some(s)) => {
+                let (y, fin) = m.forward_from(x, s);
+                (y, Some(fin))
+            }
+            _ => (self.forward(x), None),
+        }
+    }
+}
+
 impl Module for Mixer {
     fn forward(&self, x: &Tensor) -> Tensor {
         match self {
@@ -77,6 +93,15 @@ impl EvaBlock {
             norm2: RMSNorm::new(d, eps),
             glu: GLUFFN::new(d, ffn, rng),
         }
+    }
+}
+
+impl EvaBlock {
+    pub fn forward_from(&self, x: &Tensor, s0: Option<&[f32]>) -> (Tensor, Option<Vec<f32>>) {
+        let h = ops::add(x, &self.conv.forward(&self.norm0.forward(x)));
+        let (m, fin) = self.mixer.forward_from(&self.norm1.forward(&h), s0);
+        let h = ops::add(&h, &m);
+        (ops::add(&h, &self.glu.forward(&self.norm2.forward(&h))), fin)
     }
 }
 

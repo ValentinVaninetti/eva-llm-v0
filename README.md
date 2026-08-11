@@ -104,20 +104,27 @@ Un matmul suelto va 8.68x más rápido y el entrenamiento entero apenas 1.29x.
 
 `EVA_PROFILE=1` mide por etiqueta. Entrenamiento dim 512 / ffn 1024, 861 pasos:
 
-| etiqueta        | antes    | con optimizador nuevo | + GPU    |
-|-----------------|----------|-----------------------|----------|
-| matmul          | 135.6 s  | 137.3 s               | 71.4 s   |
-| backward (todo) | 173.7 s  | 172.2 s               | 136.0 s  |
-| optimizador     | 62.7 s   | **22.3 s**            | 22.6 s   |
-| clockmem fwd+bwd| 2.4 s    | 2.4 s                 | 2.4 s    |
-| **reloj**       | 310.2 s  | 269.3 s               | **201.0 s** |
+| etiqueta         | al empezar | + optimizador | + sin allocs | + GPU      |
+|------------------|-----------|---------------|--------------|------------|
+| matmul           | 135.6 s   | 137.3 s       | 133.5 s      | 66.2 s     |
+| backward (todo)  | 173.7 s   | 172.2 s       | 143.4 s      | 105.0 s    |
+| optimizador      | 62.7 s    | **22.3 s**    | 17.5 s       | 19.8 s     |
+| clockmem fwd+bwd | 2.4 s     | 2.4 s         | 2.4 s        | 2.7 s      |
+| **reloj**        | 310.2 s   | 269.3 s       | 233.1 s      | **164.3 s**|
 
-**312 s → 201 s, 1.55x**, sin tocar una sola línea de ClockMem.
+**310 s → 164 s, 1.90x**, sin tocar una sola línea de ClockMem.
 
-El optimizador se llevaba el 20% haciendo algo aburrido: dos pasadas sobre los
-10.7M de parámetros, escalar y en un solo hilo. Fusionadas en una y repartidas
-en bandas sobre el pool: 62.7 → 22.3 s. No dio 8x porque ahora está contra el
-ancho de banda de memoria (171 MB por paso), que es el piso real.
+Los dos arreglos, los dos aburridos:
+
+1. **El optimizador se llevaba el 20%.** Dos pasadas sobre los 10.7M de parámetros,
+   escalar y en un solo hilo. Fusionadas en una y repartidas en bandas sobre el pool:
+   62.7 → 22.3 s. No dio 8x porque ahora choca contra el ancho de banda de memoria
+   (171 MB por paso), que es el piso real.
+2. **`broadcast_to` y `reduce` asignaban DOS `Vec` por elemento.** Se llaman en el
+   backward de `add` y `mul`; para un tensor de 64x1024 eran 131 mil allocations en
+   una sola llamada. Reemplazadas por un recorrido con odómetro y paso 0 para la
+   dimensión que se difunde, sin tocar el heap: backward 172 → 143 s. De paso, el
+   chequeo de compatibilidad que estaba adentro del lazo sólo dependía de las formas.
 
 Lo que queda arriba de la lista, con los números en la mano: **el backward sin
 contar matmul, ~96 s, casi la mitad del total**. Eso es maquinaria de autograd

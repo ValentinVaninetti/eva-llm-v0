@@ -87,22 +87,79 @@ fn visit(node: Arc<Node>, topo: &mut Vec<Arc<Node>>, visited: &mut HashSet<usize
     topo.push(node);
 }
 
-fn index_to_coords(i: usize, shape: &[usize]) -> Vec<usize> {
-    let mut coords = vec![0; shape.len()];
-    let mut rem = i;
-    for d in (0..shape.len()).rev() {
-        coords[d] = rem % shape[d];
-        rem /= shape[d];
+/// Dimensiones que se manejan sin tocar el heap. Los tensores de este modelo
+/// tienen entre 1 y 3; ocho da margen de sobra.
+const MAX_DIMS: usize = 8;
+
+/// Recorre la salida entregando `(índice de salida, índice de origen)`.
+///
+/// SIN ASIGNAR NADA, que es todo el punto. La versión anterior llamaba por cada
+/// elemento a `index_to_coords`, que devolvía un `Vec`, y armaba otro `Vec` de
+/// coordenadas al lado: **dos allocations por número**. Para un tensor de
+/// 64x1024 son 131 mil allocations en UNA llamada, y esto se llama en el
+/// backward de `add` y de `mul`, que es donde estaba casi la mitad del tiempo.
+///
+/// El índice de origen se lleva con un odómetro: la dimensión que se difunde
+/// tiene paso 0, que es exactamente lo que significa repetir un valor.
+///
+/// Devuelve `false` si las formas no son compatibles, y **eso se decide una
+/// sola vez**: el chequeo viejo estaba adentro del lazo pero sólo dependía de
+/// las formas, así que daba lo mismo para los millones de elementos.
+fn walk(out_shape: &[usize], src_shape: &[usize], mut visit: impl FnMut(usize, usize)) -> bool {
+    let nd = out_shape.len();
+    if nd > MAX_DIMS || src_shape.len() > nd {
+        return false;
     }
-    coords
+    let off = nd - src_shape.len();
+    let mut step = [0usize; MAX_DIMS];
+    let mut stride = 1usize;
+    for d in (0..src_shape.len()).rev() {
+        if src_shape[d] == out_shape[off + d] {
+            step[off + d] = stride;
+        } else if src_shape[d] == 1 {
+            step[off + d] = 0;
+        } else {
+            return false;
+        }
+        stride *= src_shape[d];
+    }
+
+    let total: usize = out_shape.iter().product();
+    let mut coord = [0usize; MAX_DIMS];
+    let mut src = 0usize;
+    for o in 0..total {
+        visit(o, src);
+        for d in (0..nd).rev() {
+            coord[d] += 1;
+            src += step[d];
+            if coord[d] < out_shape[d] {
+                break;
+            }
+            // Se dio la vuelta: descontar lo que sumó el ciclo entero.
+            src -= step[d] * out_shape[d];
+            coord[d] = 0;
+        }
+    }
+    true
 }
 
-fn coords_to_index(c: &[usize], shape: &[usize]) -> usize {
-    let mut idx = 0;
-    for d in 0..shape.len() {
-        idx = idx * shape[d] + c[d];
+fn broadcast_to(x: &[f32], xshape: &[usize], oshape: &[usize]) -> Vec<f32> {
+    if xshape == oshape {
+        return x.to_vec();
     }
-    idx
+    let mut out = vec![0.0; oshape.iter().product()];
+    // Con formas incompatibles queda todo en cero, igual que antes.
+    walk(oshape, xshape, |o, s| out[o] = x[s]);
+    out
+}
+
+fn reduce(g: &[f32], out_shape: &[usize], to_shape: &[usize]) -> Vec<f32> {
+    if out_shape == to_shape {
+        return g.to_vec();
+    }
+    let mut out = vec![0.0; to_shape.iter().product()];
+    walk(out_shape, to_shape, |o, s| out[s] += g[o]);
+    out
 }
 
 fn broadcast_shape(a: &[usize], b: &[usize]) -> Vec<usize> {
@@ -119,61 +176,6 @@ fn broadcast_shape(a: &[usize], b: &[usize]) -> Vec<usize> {
             out[i] = da;
         } else {
             panic!("shapes not broadcastable: {:?} vs {:?}", a, b);
-        }
-    }
-    out
-}
-
-fn broadcast_to(x: &[f32], xshape: &[usize], oshape: &[usize]) -> Vec<f32> {
-    if xshape == oshape {
-        return x.to_vec();
-    }
-    let n = oshape.iter().product::<usize>();
-    let mut out = vec![0.0; n];
-    let off = oshape.len() - xshape.len();
-    for oidx in 0..n {
-        let oc = index_to_coords(oidx, oshape);
-        let mut xc = vec![0; xshape.len()];
-        let mut ok = true;
-        for d in 0..xshape.len() {
-            let od = off + d;
-            if xshape[d] == oshape[od] {
-                xc[d] = oc[od];
-            } else if xshape[d] == 1 {
-                xc[d] = 0;
-            } else {
-                ok = false;
-            }
-        }
-        if ok {
-            out[oidx] = x[coords_to_index(&xc, xshape)];
-        }
-    }
-    out
-}
-
-fn reduce(g: &[f32], out_shape: &[usize], to_shape: &[usize]) -> Vec<f32> {
-    if out_shape == to_shape {
-        return g.to_vec();
-    }
-    let mut out = vec![0.0; to_shape.iter().product()];
-    let off = out_shape.len() - to_shape.len();
-    for oidx in 0..g.len() {
-        let oc = index_to_coords(oidx, out_shape);
-        let mut tc = vec![0; to_shape.len()];
-        let mut ok = true;
-        for d in 0..to_shape.len() {
-            let od = off + d;
-            if to_shape[d] == out_shape[od] {
-                tc[d] = oc[od];
-            } else if to_shape[d] == 1 {
-                tc[d] = 0;
-            } else {
-                ok = false;
-            }
-        }
-        if ok {
-            out[coords_to_index(&tc, to_shape)] += g[oidx];
         }
     }
     out

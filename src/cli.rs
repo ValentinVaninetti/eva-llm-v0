@@ -16,6 +16,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "gen" => cmd_gen(&args[1..]),
         "info" => cmd_info(&args[1..]),
         "gpu" => cmd_gpu(&args[1..]),
+        "recall" => cmd_recall(&args[1..]),
         "help" | "-h" | "--help" => {
             print_help();
             Ok(())
@@ -76,6 +77,67 @@ fn cmd_info(args: &[String]) -> Result<(), String> {
     let weights = flag(args, "weights").ok_or("info requiere --weights <archivo>")?;
     let model = load_model(&weights).map_err(|e| e.to_string())?;
     println!("{}", describe(&model));
+    Ok(())
+}
+
+/// Mide si un modelo chico MÁS una tabla de k-gramas alcanza a uno grande.
+///
+/// Tres particiones y no dos: el peso de mezcla se elige sobre DESARROLLO y se
+/// reporta sobre VALIDACIÓN. Elegir lambda mirando validación sería ajustar
+/// contra el examen -- daría el mejor número posible y no significaría nada.
+fn cmd_recall(args: &[String]) -> Result<(), String> {
+    check_unknown(args, &["weights", "data", "seq"])?;
+    let weights = flag(args, "weights").ok_or("recall requiere --weights")?;
+    let data = flag(args, "data").ok_or("recall requiere --data")?;
+    let model = load_model(&weights).map_err(|e| e.to_string())?;
+    let seq = flag_num(args, "seq", model.cfg.seq_len)?;
+
+    let ds = crate::data::TextDataset::from_file(&data, seq).map_err(|e| e.to_string())?;
+    let n = ds.num_windows();
+    // 80 / 10 / 10, contiguo. El modelo tiene que haberse entrenado con
+    // --val 0.2 para que no haya visto ni desarrollo ni validación.
+    let fin_train = n * 8 / 10;
+    let fin_dev = n * 9 / 10;
+
+    let bytes_train: Vec<usize> = ds.ids[..fin_train * seq].to_vec();
+    let tabla = crate::recall::Recall::build(&bytes_train);
+    println!("modelo {} params | tabla {} entradas, ~{:.1} KB",
+        model.param_count(), tabla.entries(), tabla.bytes() as f64 / 1024.0);
+
+    let evaluar = |desde: usize, hasta: usize, lambda: f32| -> f32 {
+        let mut suma = 0.0;
+        let mut cuenta = 0;
+        for wi in desde..hasta {
+            let (input, target) = ds.window(wi);
+            let logits = model.forward(&input);
+            let antes: Vec<usize> = if wi == 0 { Vec::new() } else { ds.ids[..wi * seq].to_vec() };
+            suma += crate::recall::mixed_loss(
+                &logits.data, model.cfg.vocab, &antes, &target, &tabla, lambda);
+            cuenta += 1;
+        }
+        suma / cuenta as f32
+    };
+
+    // Barrido sobre DESARROLLO.
+    let mut mejor = (0.0f32, f32::INFINITY);
+    println!("  lambda   desarrollo");
+    for paso in 0..=10 {
+        let l = paso as f32 * 0.05;
+        let p = evaluar(fin_train, fin_dev, l);
+        println!("   {l:.2}     {p:.4}");
+        if p < mejor.1 {
+            mejor = (l, p);
+        }
+    }
+
+    // Y una sola pasada por VALIDACIÓN, con el lambda ya elegido.
+    let solo = evaluar(fin_dev, n, 0.0);
+    let con = evaluar(fin_dev, n, mejor.0);
+    let bpb = |x: f32| x / std::f32::consts::LN_2;
+    println!("\nVALIDACIÓN (lambda {:.2} elegido en desarrollo)", mejor.0);
+    println!("  modelo solo      {:.4}  |  {:.3} bits/byte", solo, bpb(solo));
+    println!("  modelo + tabla   {:.4}  |  {:.3} bits/byte", con, bpb(con));
+    println!("  mejora           {:.1}%", 100.0 * (solo - con) / solo);
     Ok(())
 }
 

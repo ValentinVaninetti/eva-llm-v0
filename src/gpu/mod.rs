@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
 use std::ptr;
+use std::sync::OnceLock;
 
 use ffi::*;
 
@@ -82,6 +83,50 @@ impl Cache {
         self.a = None;
         self.b = None;
         self.c = None;
+    }
+}
+
+/// Reloj de las tres fases de un `matmul`, activo sólo con `EVA_GPU_PROFILE=1`.
+///
+/// Existe porque el tiling en registros dio 1.13x y no el 2-4x que predecía la
+/// cuenta de lecturas de LDS: si el kernel fuera el cuello, esa cuenta habría
+/// dado. Sin partir el tiempo en subir / calcular / bajar, la siguiente
+/// optimización se elige tirando la moneda.
+struct Watch(Option<std::time::Instant>);
+
+impl Watch {
+    fn start() -> Self {
+        static ON: OnceLock<bool> = OnceLock::new();
+        let on = *ON.get_or_init(|| std::env::var("EVA_GPU_PROFILE").is_ok());
+        Watch(on.then(std::time::Instant::now))
+    }
+
+    /// Tiempo desde el corte anterior, y reinicia.
+    fn lap(&self) -> std::time::Duration {
+        self.0.map(|t| t.elapsed()).unwrap_or_default()
+    }
+
+    fn report(
+        &self,
+        m: usize,
+        k: usize,
+        n: usize,
+        subida: std::time::Duration,
+        hasta_cola: std::time::Duration,
+    ) {
+        let Some(t0) = self.0 else { return };
+        let total = t0.elapsed();
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1e3;
+        // `lap` mide desde el arranque, así que las fases son diferencias.
+        let cola = hasta_cola.saturating_sub(subida);
+        let bajada = total.saturating_sub(hasta_cola);
+        eprintln!(
+            "[gpu {m}x{k}x{n}] subir {:.3} | cola+cálculo {:.3} | bajar {:.3} | total {:.3} ms",
+            ms(subida),
+            ms(cola),
+            ms(bajada),
+            ms(total),
+        );
     }
 }
 
@@ -247,9 +292,9 @@ impl Gpu {
         let mut cache = self.cache.borrow_mut();
         // `|` and not `||`: every slot must be checked, not short-circuited on
         // the first one that already fit.
-        let grew = self.fit(&mut cache.a, a.len() * 4, BUFFER_USAGE_TRANSFER_DST_BIT)?
-            | self.fit(&mut cache.b, b.len() * 4, BUFFER_USAGE_TRANSFER_DST_BIT)?
-            | self.fit(&mut cache.c, m * n * 4, BUFFER_USAGE_TRANSFER_SRC_BIT)?;
+        let grew = self.fit(&mut cache.a, a.len() * 4, BUFFER_USAGE_TRANSFER_DST_BIT, false)?
+            | self.fit(&mut cache.b, b.len() * 4, BUFFER_USAGE_TRANSFER_DST_BIT, false)?
+            | self.fit(&mut cache.c, m * n * 4, BUFFER_USAGE_TRANSFER_SRC_BIT, true)?;
 
         let (sa, da) = cache.a.as_ref().map(|s| (&s.host, &s.dev)).expect("slot a");
         let (sb, db) = cache.b.as_ref().map(|s| (&s.host, &s.dev)).expect("slot b");
@@ -261,8 +306,10 @@ impl Gpu {
             self.bind_ds(self.ds, da, db, dc)?;
         }
 
+        let t = Watch::start();
         self.write(sa, a);
         self.write(sb, b);
+        let subida = t.lap();
         let ds = self.ds;
 
         self.record(|cb| {
@@ -304,7 +351,11 @@ impl Gpu {
                 );
                 let params = [m as u32, k as u32, n as u32];
                 vkCmdPushConstants(cb, self.pipeline_layout, SHADER_STAGE_COMPUTE_BIT, 0, 12, params.as_ptr().cast());
-                vkCmdDispatch(cb, ((n + 15) / 16) as u32, ((m + 15) / 16) as u32, 1);
+                // Un grupo cubre 64x64 de C (16x16 hilos, 4x4 cada uno), no
+                // 16x16. Si esto y el TILE del shader se desincronizan, salen
+                // resultados parciales sin ningún error de Vulkan.
+                const TILE: usize = 64;
+                vkCmdDispatch(cb, n.div_ceil(TILE) as u32, m.div_ceil(TILE) as u32, 1);
 
                 // compute -> transfer (read C back)
                 self.barrier(
@@ -330,15 +381,22 @@ impl Gpu {
             }
         })?;
 
-        // Quien mide es el que llama: cronometrar acá adentro y volver a
-        // cronometrar afuera daba dos números distintos para lo mismo.
-        self.read(sc, m * n)
+        let cola = t.lap();
+        let out = self.read(sc, m * n);
+        t.report(m, k, n, subida, cola);
+        out
     }
 
     /// Makes sure the slot can hold `bytes`, allocating only when it must grow.
     /// Returns whether the buffers changed, which is the only reason to rebind
     /// the descriptor set.
-    fn fit(&self, slot: &mut Option<Slot>, bytes: usize, dev_usage: VkFlags) -> Result<bool, String> {
+    fn fit(
+        &self,
+        slot: &mut Option<Slot>,
+        bytes: usize,
+        dev_usage: VkFlags,
+        readback: bool,
+    ) -> Result<bool, String> {
         if slot.as_ref().is_some_and(|s| s.bytes >= bytes) {
             return Ok(false);
         }
@@ -346,7 +404,7 @@ impl Gpu {
         // on its fence) and freeing before allocating keeps the peak down.
         *slot = None;
         *slot = Some(Slot {
-            host: self.host_buffer(bytes)?,
+            host: self.host_buffer(bytes, readback)?,
             dev: self.device_buffer(bytes, dev_usage | BUFFER_USAGE_STORAGE_BUFFER_BIT)?,
             bytes,
         });
@@ -429,12 +487,26 @@ impl Gpu {
         self.buffer(size, usage, MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
     }
 
-    fn host_buffer(&self, size: usize) -> Result<Buffer, String> {
-        self.buffer(
-            size,
-            BUFFER_USAGE_TRANSFER_SRC_BIT | BUFFER_USAGE_TRANSFER_DST_BIT,
-            MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        )
+    /// Staging visible desde la CPU.
+    ///
+    /// `readback` NO es un detalle: medido a 1024x1024, bajar el resultado se
+    /// llevaba 12-18 ms de un total de 20, contra 4.85 de cálculo. La memoria
+    /// HOST_VISIBLE|HOST_COHERENT a secas es, en una placa discreta, memoria
+    /// SIN CACHÉ: escribirla de corrido está bien, pero leerla desde la CPU va
+    /// a paso de peatón (~300 MB/s, que es exactamente lo que daban esos 4 MB).
+    /// Para el buffer que se lee se pide además HOST_CACHED; para los que sólo
+    /// se escriben conviene lo contrario, así que se pide aparte.
+    fn host_buffer(&self, size: usize, readback: bool) -> Result<Buffer, String> {
+        let usage = BUFFER_USAGE_TRANSFER_SRC_BIT | BUFFER_USAGE_TRANSFER_DST_BIT;
+        let base = MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        if readback {
+            if let Ok(b) = self.buffer(size, usage, base | MEMORY_PROPERTY_HOST_CACHED_BIT) {
+                return Ok(b);
+            }
+            // No todas las placas ofrecen cached+coherent; si no está, se sigue
+            // con lo de siempre en vez de fallar.
+        }
+        self.buffer(size, usage, base)
     }
 
     fn buffer(&self, size: usize, usage: VkFlags, want: VkFlags) -> Result<Buffer, String> {

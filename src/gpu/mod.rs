@@ -289,6 +289,26 @@ impl Gpu {
     }
 
     pub fn matmul(&self, a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Result<Vec<f32>, String> {
+        let mut out = vec![0.0f32; m * n];
+        self.matmul_into(a, b, m, k, n, &mut out)?;
+        Ok(out)
+    }
+
+    /// Igual, escribiendo en un buffer que ya existe.
+    ///
+    /// `math::matmul` ya tiene su `out`: devolverle un `Vec` nuevo era pedir
+    /// una allocation y una copia de más por llamada, justo en el camino que
+    /// se optimizó para no tener ninguna.
+    pub fn matmul_into(
+        &self,
+        a: &[f32],
+        b: &[f32],
+        m: usize,
+        k: usize,
+        n: usize,
+        out: &mut [f32],
+    ) -> Result<(), String> {
+        assert_eq!(out.len(), m * n, "el destino no tiene el tamaño de C");
         let mut cache = self.cache.borrow_mut();
         // `|` and not `||`: every slot must be checked, not short-circuited on
         // the first one that already fit.
@@ -382,9 +402,9 @@ impl Gpu {
         })?;
 
         let cola = t.lap();
-        let out = self.read(sc, m * n);
+        self.read_into(sc, out)?;
         t.report(m, k, n, subida, cola);
-        out
+        Ok(())
     }
 
     /// Makes sure the slot can hold `bytes`, allocating only when it must grow.
@@ -564,17 +584,16 @@ impl Gpu {
         }
     }
 
-    fn read(&self, b: &Buffer, len: usize) -> Result<Vec<f32>, String> {
+    fn read_into(&self, b: &Buffer, out: &mut [f32]) -> Result<(), String> {
         unsafe {
             let mut ptr: *mut c_void = ptr::null_mut();
             check(
-                vkMapMemory(self.device, b.memory, 0, (len * 4) as u64, 0, &mut ptr),
+                vkMapMemory(self.device, b.memory, 0, (out.len() * 4) as u64, 0, &mut ptr),
                 "vkMapMemory",
             )?;
-            let mut out = vec![0.0f32; len];
-            std::ptr::copy_nonoverlapping(ptr.cast::<f32>(), out.as_mut_ptr(), len);
+            std::ptr::copy_nonoverlapping(ptr.cast::<f32>(), out.as_mut_ptr(), out.len());
             vkUnmapMemory(self.device, b.memory);
-            Ok(out)
+            Ok(())
         }
     }
 

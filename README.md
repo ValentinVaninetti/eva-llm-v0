@@ -9,8 +9,12 @@ negocio (hardware más caro). Acá la prioridad es eficiencia y apertura.
 
 ## Qué hay en esta carpeta (v0)
 
-- **`src/math.rs`** — hot path. `matmul` con AVX2+FMA (detección en runtime) y multithreading
-  con `std::thread::scope`; fallback escalar con tiling para cache.
+- **`src/math.rs`** — hot path. `matmul` con AVX2+FMA (detección en runtime), repartido en
+  bandas de filas sobre el pool; fallback escalar con tiling para cache.
+- **`src/pool.rs`** — pool de hilos persistente. Los hilos se crean una vez y se estacionan;
+  el que llama trabaja también. `EVA_SERIAL=1` lo saltea entero (útil para aislar bugs).
+- **`src/gpu/`** — backend Vulkan por FFI cruda (sin `ash`, sin `wgpu`): instancia, device,
+  pipeline de cómputo y un shader de matmul con tiling en registros.
 - **`src/tensor/`** — tensores contiguos (`Vec<f32>` + shape) y **autograd propio**:
   grafo de nodos, `saved_t`/`saved_f`/`saved_u` por operación, backward por op.
 - **`src/tensor/ops.rs`** — ops con backward: `add`, `mul`, `scale`, `matmul`, `silu`,
@@ -62,14 +66,77 @@ o_t = q_t ⊙ s_t ⊙ g_t                     // lectura con gate
 Es una mezcla de linear attention + RNN multi-escala per-channel. No es el transformer de
 siempre: es barato, pequeño y fácil de tocar.
 
+## Rendimiento medido
+
+Todo lo de abajo salió de `eva gpu`, mejor de 3 corridas de 30, **en una GTX 1650**.
+La RX 580 de Martha es la placa que importa y estos números **no** están tomados ahí
+todavía: la máquina estaba apagada. Tomarlos es el primer pendiente.
+
+| matmul  | GPU al empezar | GPU hoy    | CPU (8 hilos) |
+|---------|----------------|------------|---------------|
+| 512³    | 11.63 ms       | **1.10 ms**| 8.00 ms       |
+| 1024³   | ~27 ms         | **5.98 ms**| 142.86 ms     |
+
+A 1024³ eso es ~360 GFLOP/s: **13% del pico teórico** de la placa. Queda margen, pero
+el próximo paso se elige con el perfil en la mano.
+
+### Y sin embargo, entrenar casi no mejora
+
+`EVA_GPU=1` manda a la GPU todo matmul con más de 4M de trabajo (umbral medido: el
+cruce está entre 128³, donde la CPU gana 1.25x, y 192³, donde gana la GPU 1.29x).
+Entrenamiento completo de punta a punta, mismo corpus, misma config:
+
+| modelo             | CPU      | GPU      |         |
+|--------------------|----------|----------|---------|
+| dim 256 / ffn 512  | 174.3 s  | 157.9 s  | 1.10x   |
+| dim 512 / ffn 1024 | 312.3 s  | 241.6 s  | 1.29x   |
+
+Un matmul suelto va 8.68x más rápido y el entrenamiento entero apenas 1.29x. **La
+conclusión no es que la GPU no sirva: es que en EvaClock el matmul no es lo que
+domina.** Lo que domina es la recurrencia de ClockMem, que es secuencial en el tiempo
+y se queda en la CPU. Por eso el próximo ítem que mueve la aguja no es afinar más el
+shader sino el **scan asociativo paralelo** — sin eso, optimizar matmul es limar una
+pieza que no es el cuello.
+
+Está apagado por defecto a propósito: la GPU suma en otro orden, así que dos
+entrenamientos con y sin ella no dan bit a bit lo mismo. Que eso pase tiene que ser
+una decisión. Las pérdidas finales sí coinciden (0.112 vs 0.118 en el chico).
+
+```sh
+cargo run --release -- gpu --m 1024 --k 1024 --n 1024 --iters 30
+EVA_GPU_PROFILE=1 cargo run --release -- gpu   # parte el tiempo en subir/calcular/bajar
+cargo test --release                            # 12 tests
+cargo test --release -- --ignored               # 2 más, piden una GPU con Vulkan
+```
+
+## Trampas que ya nos costaron caro
+
+Están documentadas en el encabezado de cada archivo, pero conviene tenerlas juntas:
+
+1. **`pool.rs`** — esperar en un condvar con `if` en vez de `while`, más `notify_all` al
+   terminar, hacía que los workers se despertaran entre sí y **re-ejecutaran el trabajo
+   viejo**: medido, 23 a 31 veces cada pieza por una sola llamada. Invisible mientras los
+   buffers vivieran; SIGSEGV apenas el que llamaba liberaba los suyos.
+2. **`gpu/mod.rs`** — el descriptor pool tenía lugar para un set y se pedía uno por
+   llamada: **la segunda llamada de cualquier proceso fallaba**. No se notó nunca porque
+   `eva gpu` multiplicaba una sola vez.
+3. **`gpu/mod.rs`** — staging `HOST_VISIBLE|HOST_COHERENT` sin `HOST_CACHED` es memoria
+   **sin caché**: escribirla va bien, leerla desde la CPU va a ~300 MB/s. Bajar el
+   resultado se llevaba el 70% del tiempo total. Un flag.
+
+La moraleja de las tres, y de la que más duele: **la intuición decía "optimizá el
+shader" y eran los flags de memoria.** Medir primero, partido en fases.
+
 ## Roadmap
 
 - [x] Núcleo tensor + autograd + arquitectura EvaClock
-- [ ] Validación numérica del autograd (gradcheck contra diferencias finitas)
+- [x] Validación numérica del autograd (gradcheck contra diferencias finitas)
+- [x] Backend GPU **Vulkan** (compute shaders) — nunca CUDA
+- [x] Thread pool persistente (no spawn por matmul)
+- [ ] **Medir todo esto en la RX 580** (los números de arriba son de una GTX 1650)
+- [x] Integrar el matmul de GPU en `math::matmul` como backend opcional (`EVA_GPU=1`), con umbral medido
+- [ ] **Scan asociativo paralelo para ClockMem** — el cuello real del entrenamiento, ver arriba
 - [ ] BPE/tokenizer multilingüe
-- [ ] Backend GPU **Vulkan** (compute shaders) para la RX 580 — nunca CUDA
-- [ ] Scan asociativo paralelo para entrenar ClockMem con O(log n)
-- [ ] Thread pool persistente (no spawn por matmul)
 - [ ] CUDA: **no**, a propósito
 
 ## Uso

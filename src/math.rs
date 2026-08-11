@@ -1,3 +1,15 @@
+/// A partir de cuánto trabajo conviene la GPU, MEDIDO (GTX 1650, `eva gpu`):
+///
+/// ```text
+///   128³ = 2.1M   CPU gana 1.25x     el costo fijo de subir/encolar/bajar
+///   192³ = 7.1M   GPU gana 1.29x     todavía no se amortiza abajo de esto
+///   512³ = 134M   GPU gana 8.68x
+/// ```
+///
+/// El cruce está entre esos dos; 4M es el punto medio. **Es el número de una
+/// GTX 1650**: en la RX 580 hay que volver a medirlo, no heredarlo.
+const GPU_FROM: usize = 4_000_000;
+
 pub fn matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, out: &mut [f32]) {
     debug_assert_eq!(a.len(), m * k);
     debug_assert_eq!(b.len(), k * n);
@@ -8,6 +20,9 @@ pub fn matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, out: &mut [f32
     }
 
     let work = m * k * n;
+    if work >= GPU_FROM && gpu_matmul(a, b, m, k, n, out) {
+        return;
+    }
     if work < 200_000 {
         matmul_rows(a, b, k, n, out, 0, 0, m);
         return;
@@ -45,6 +60,52 @@ pub fn matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, out: &mut [f32
         matmul_rows(a_ptr.as_ref(m * k), b_ptr.as_ref(k * n), k, n, band, bs, 0, be - bs);
     };
     pool.run(chunks, f);
+}
+
+/// Intenta hacerlo en la GPU. Devuelve `false` si no hay o si falló, y en ese
+/// caso el que llama sigue por CPU como si nada.
+///
+/// SE PRENDE CON `EVA_GPU=1`, a propósito apagado por defecto: la GPU suma en
+/// otro orden, así que dos entrenamientos con y sin ella no dan bit a bit lo
+/// mismo. Que eso pase tiene que ser una decisión, no una sorpresa.
+///
+/// Por hilo, y no global, porque los handles de Vulkan no son `Send`. En la
+/// práctica sólo el hilo principal llega hasta acá: los workers del pool
+/// entran por `matmul_rows`, más abajo.
+fn gpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, out: &mut [f32]) -> bool {
+    use std::cell::OnceCell;
+    thread_local! {
+        static GPU: OnceCell<Option<crate::gpu::Gpu>> = const { OnceCell::new() };
+    }
+    GPU.with(|cell| {
+        let gpu = cell.get_or_init(|| {
+            if std::env::var("EVA_GPU").as_deref() != Ok("1") {
+                return None;
+            }
+            match crate::gpu::Gpu::init() {
+                Ok(g) => {
+                    eprintln!("[eva] matmul por GPU: {}", g.info().name);
+                    Some(g)
+                }
+                Err(e) => {
+                    eprintln!("[eva] sin GPU ({e}); sigo por CPU");
+                    None
+                }
+            }
+        });
+        match gpu {
+            None => false,
+            Some(g) => match g.matmul_into(a, b, m, k, n, out) {
+                Ok(()) => true,
+                // Un error de Vulkan a mitad de un entrenamiento no puede
+                // tirarlo abajo: se avisa y se sigue por CPU.
+                Err(e) => {
+                    eprintln!("[eva] la GPU falló ({e}); sigo por CPU");
+                    false
+                }
+            },
+        }
+    })
 }
 
 /// Thin wrapper over a raw pointer that is `Send + Sync`. Sound because the

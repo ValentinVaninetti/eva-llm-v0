@@ -141,6 +141,42 @@ cargo test --release                            # 12 tests
 cargo test --release -- --ignored               # 2 más, piden una GPU con Vulkan
 ```
 
+## ¿Es buena la arquitectura? Ahora hay un número
+
+Mismo bloque, misma conv, mismo FFN, mismo optimizador, mismas semillas, mismo
+corpus. **Lo único que cambia es el mezclador temporal.** ClockMem tiene
+`wq/wk/wv/wg` y la atención `wq/wk/wv/wo`: cuatro matrices DxD cada uno.
+
+250 KB de prosa real, dim 256 / ffn 512 / 4 bloques / seq 64, 1 época, 10%
+reservado para validar (corte contiguo al final). Pérdida sobre texto no visto:
+
+| mezclador                | s7     | s8     | s9     | media      | bits/byte | tiempo |
+|--------------------------|--------|--------|--------|------------|-----------|--------|
+| **ClockMem** (2.77 M)    | 1.8245 | 1.8307 | 1.8135 | **1.8229** | **2.630** | 319 s  |
+| atención (2.77 M)        | 1.8585 | 1.8711 | 1.8593 | 1.8630     | 2.688     | 339 s  |
+| atención + pos (2.78 M)  | 1.9253 | 1.9229 | 1.9166 | 1.9216     | 2.772     | 345 s  |
+
+**ClockMem gana por 2.2% y corre 6% más rápido**, con estado O(D) en inferencia
+contra O(S²) de cómputo. Los tres grupos no se solapan: la peor corrida de
+ClockMem (1.8307) es mejor que la mejor de la atención (1.8585), y la brecha
+entre arquitecturas es mayor que la dispersión dentro de cada una.
+
+La tercera fila es una hipótesis mía que salió mal, y se deja porque ese es el
+punto: sospeché que la comparación era injusta --ClockMem codifica la posición
+gratis en el decaimiento `α^(t-i)` y la atención no tenía nada-- así que le di
+posiciones absolutas aprendidas y 16 K parámetros de ventaja. **Empeoró en las
+tres semillas.** La conv causal depthwise ya le daba estructura posicional; la
+tabla sólo diluía. El resultado original no era un artefacto.
+
+### Lo que este número NO dice
+
+- **seq 64 es corto.** Lo que compra la atención es recuperación asociativa a
+  distancia, y a 64 tokens casi no hay distancia. La comparación que falta es a
+  contexto largo, donde ella paga O(S²) y ClockMem O(S).
+- Un corpus, un tamaño, una época. Los dos modelos están muy poco entrenados.
+- Una sola cabeza, y posiciones absolutas aprendidas (el esquema posicional más
+  débil). Con RoPE o multi-cabeza el resultado podría moverse.
+
 ## Trampas que ya nos costaron caro
 
 Están documentadas en el encabezado de cada archivo, pero conviene tenerlas juntas:
@@ -155,7 +191,12 @@ Están documentadas en el encabezado de cada archivo, pero conviene tenerlas jun
 3. **`gpu/mod.rs`** — staging `HOST_VISIBLE|HOST_COHERENT` sin `HOST_CACHED` es memoria
    **sin caché**: escribirla va bien, leerla desde la CPU va a ~300 MB/s. Bajar el
    resultado se llevaba el 70% del tiempo total. Un flag.
-4. **Creer que el cuello era ClockMem** por evidencia indirecta, escribirlo en este
+4. **Cortar un tensor con `Tensor::new` para pasarlo al grafo.** El corte no
+   tiene nodo de autograd: el gradiente nunca vuelve y el parámetro entrena
+   contra nada, **en silencio y con el mismo aspecto que uno que aprende**. Por
+   eso existe `slice_rows`, con gradcheck y con un test de que NO llegue
+   gradiente a las filas no usadas.
+5. **Creer que el cuello era ClockMem** por evidencia indirecta, escribirlo en este
    README como un hecho, y que al medirlo fuera el **0.8%**. La evidencia indirecta
    sirve para elegir qué medir, nunca para concluir.
 

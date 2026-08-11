@@ -213,3 +213,17 @@ fn causal_softmax_does_not_look_ahead() {
         assert!((fila - 1.0).abs() < 1e-6, "la fila {i} no suma 1: {fila}");
     }
 }
+
+#[test]
+fn gradcheck_slice_rows() {
+    // El gradiente tiene que volver a las filas cortadas y NO a las de abajo.
+    // Sin esto, la tabla de posiciones entrena en silencio contra nada.
+    let mut x = param((0..12).map(|i| (i as f32) * 0.3 - 1.0).collect(), vec![4, 3]);
+    gradcheck_unary("slice_rows", &mut x, |t| ops::slice_rows(t, 2));
+
+    let g = {
+        let y = ops::slice_rows(&x, 2);
+        backward(&ops::sum_all(&y)).get(&x.id).cloned().unwrap()
+    };
+    assert_eq!(vec![0.0; 6], g[6..].to_vec(), "llegó gradiente a filas que no se usaron");
+}

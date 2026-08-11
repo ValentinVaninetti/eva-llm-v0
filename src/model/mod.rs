@@ -77,6 +77,17 @@ impl Default for EvaConfig {
 pub struct EvaModel {
     pub cfg: EvaConfig,
     pub embed: Embedding,
+    /// Posiciones absolutas aprendidas, SÓLO para la atención.
+    ///
+    /// ClockMem codifica la posición gratis en el decaimiento `α^(t-i)`: la
+    /// cercanía está adentro del mecanismo. La atención sin esto no distingue
+    /// orden, sólo contenido, y compararlas así es ganarle a un rival con una
+    /// mano atada.
+    ///
+    /// Le suma seq_len*dim (16 K de 2.77 M, 0.6%) que ClockMem no tiene. La
+    /// desventaja queda de nuestro lado a propósito: si igual gana ClockMem,
+    /// el resultado vale más.
+    pub pos: Option<Tensor>,
     pub blocks: Vec<EvaBlock>,
     pub norm_out: RMSNorm,
     pub head_w: Tensor,
@@ -89,6 +100,12 @@ impl EvaModel {
         let bound = 1.0 / (dim as f32).sqrt();
         EvaModel {
             embed: Embedding::new(cfg.vocab, dim, &mut rng),
+            pos: (cfg.arch == Arch::Attn).then(|| {
+                param(
+                    (0..cfg.seq_len * dim).map(|_| rng.uniform(-bound, bound)).collect(),
+                    vec![cfg.seq_len, dim],
+                )
+            }),
             blocks: (0..cfg.blocks)
                 .map(|_| EvaBlock::new(dim, cfg.ffn_dim, cfg.conv_kernel, cfg.eps, cfg.arch, &mut rng))
                 .collect(),
@@ -103,6 +120,12 @@ impl EvaModel {
 
     pub fn forward(&self, ids: &[usize]) -> Tensor {
         let mut x = self.embed.embed(ids);
+        if let Some(pos) = &self.pos {
+            // En generación la ventana crece de a un token, así que el corte
+            // no es decorativo.
+            let n = ids.len().min(self.cfg.seq_len);
+            x = ops::add(&x, &ops::slice_rows(pos, n));
+        }
         for b in &self.blocks {
             x = b.forward(&x);
         }
@@ -113,6 +136,8 @@ impl EvaModel {
     pub fn parameters(&self) -> Vec<&Tensor> {
         let mut out = Vec::new();
         out.push(&self.embed.table);
+        if let Some(p) = &self.pos { out.push(p); }
+
         for b in &self.blocks {
             out.extend(b.parameters());
         }
@@ -124,6 +149,8 @@ impl EvaModel {
     pub fn parameters_mut(&mut self) -> Vec<&mut Tensor> {
         let mut out = Vec::new();
         out.push(&mut self.embed.table);
+        if let Some(p) = &mut self.pos { out.push(p); }
+
         for b in &mut self.blocks {
             out.extend(b.parameters_mut());
         }
@@ -135,6 +162,9 @@ impl EvaModel {
     pub fn named_parameters(&self) -> Vec<(String, &Tensor)> {
         let mut out = Vec::new();
         out.push(("embed.table".to_string(), &self.embed.table));
+        if let Some(p) = &self.pos {
+            out.push(("pos".to_string(), p));
+        }
         for (i, b) in self.blocks.iter().enumerate() {
             out.extend(b.named_parameters(&format!("blocks.{}", i)));
         }
@@ -146,6 +176,9 @@ impl EvaModel {
     pub fn named_parameters_mut(&mut self) -> Vec<(String, &mut Tensor)> {
         let mut out = Vec::new();
         out.push(("embed.table".to_string(), &mut self.embed.table));
+        if let Some(p) = &mut self.pos {
+            out.push(("pos".to_string(), p));
+        }
         for (i, b) in self.blocks.iter_mut().enumerate() {
             out.extend(b.named_parameters_mut(&format!("blocks.{}", i)));
         }

@@ -181,6 +181,10 @@ fn broadcast_shape(a: &[usize], b: &[usize]) -> Vec<usize> {
     out
 }
 
+fn n_su(n: &Node, i: usize) -> usize {
+    n.saved_u[i]
+}
+
 fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
     let mut out: Vec<(usize, Vec<f32>)> = Vec::new();
     let mut push = |idx: usize, gv: Vec<f32>| {
@@ -261,6 +265,13 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
                     gx[i * s + j] = y[i * s + j] * (g[i * s + j] - dot);
                 }
             }
+            push(0, gx);
+        }
+        "slice_rows" => {
+            let (s, d, n) = (n_su(n, 0), n_su(n, 1), n_su(n, 2));
+            // Lo que no se cortó no recibió nada: cero.
+            let mut gx = vec![0.0; s * d];
+            gx[..n * d].copy_from_slice(&g[..n * d]);
             push(0, gx);
         }
         "silu" => {

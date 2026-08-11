@@ -177,6 +177,20 @@ pub fn softmax_causal(x: &Tensor) -> Tensor {
     finalize(&[x], "softmax_causal", out.clone(), x.shape.clone(), vec![out], vec![], vec![s])
 }
 
+/// Las primeras `n` filas de un tensor (S,D).
+///
+/// Hace falta porque en generación la ventana crece de a un token y la tabla
+/// de posiciones es de largo fijo. Cortarla con `Tensor::new` parecía
+/// equivalente y no lo es: un tensor construido a mano no tiene nodo, así que
+/// el gradiente nunca vuelve y la tabla no aprende nada -- falla en silencio,
+/// entrenando un parámetro muerto.
+pub fn slice_rows(x: &Tensor, n: usize) -> Tensor {
+    assert_eq!(x.shape.len(), 2, "slice_rows expects (S,D)");
+    let (s, d) = (x.shape[0], x.shape[1]);
+    assert!(n <= s, "slice_rows: {n} filas de un tensor de {s}");
+    finalize(&[x], "slice_rows", x.data[..n * d].to_vec(), vec![n, d], vec![], vec![], vec![s, d, n])
+}
+
 pub fn silu(x: &Tensor) -> Tensor {
     let out: Vec<f32> = x.data.iter().map(|&v| v / (1.0 + (-v).exp())).collect();
     finalize(&[x], "silu", out, x.shape.clone(), vec![x.data.clone()], vec![], vec![])

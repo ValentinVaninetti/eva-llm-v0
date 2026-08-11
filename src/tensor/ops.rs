@@ -224,16 +224,18 @@ pub fn clockmem(
     let beta_v = beta.data[0];
     let mut state = vec![0.0; s * d];
     let mut out = vec![0.0; s * d];
-    let mut cur = vec![0.0; d];
-    for t in 0..s {
-        for c in 0..d {
-            cur[c] = alpha.data[c] * cur[c] + beta_v * k.data[t * d + c] * v.data[t * d + c];
-            state[t * d + c] = cur[c];
+    crate::prof::time(crate::prof::P::ClockFwd, || {
+        let mut cur = vec![0.0; d];
+        for t in 0..s {
+            for c in 0..d {
+                cur[c] = alpha.data[c] * cur[c] + beta_v * k.data[t * d + c] * v.data[t * d + c];
+                state[t * d + c] = cur[c];
+            }
+            for c in 0..d {
+                out[t * d + c] = q.data[t * d + c] * cur[c] * g.data[t * d + c];
+            }
         }
-        for c in 0..d {
-            out[t * d + c] = q.data[t * d + c] * cur[c] * g.data[t * d + c];
-        }
-    }
+    });
     finalize(
         &[q, k, v, g, alpha, beta],
         "clockmem",

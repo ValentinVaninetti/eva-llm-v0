@@ -360,6 +360,7 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
             let mut ga = vec![0.0; d];
             let mut gb = 0.0;
             let mut gs = vec![0.0; d];
+            crate::prof::time(crate::prof::P::ClockBwd, || {
             for t in (0..s).rev() {
                 let gt = &g[t * d..(t + 1) * d];
                 for c in 0..d {
@@ -379,6 +380,7 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
                     gs[c] *= alpha[c];
                 }
             }
+            });
             push(0, gq);
             push(1, gk);
             push(2, gv);

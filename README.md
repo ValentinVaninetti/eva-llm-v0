@@ -91,12 +91,37 @@ Entrenamiento completo de punta a punta, mismo corpus, misma config:
 | dim 256 / ffn 512  | 174.3 s  | 157.9 s  | 1.10x   |
 | dim 512 / ffn 1024 | 312.3 s  | 241.6 s  | 1.29x   |
 
-Un matmul suelto va 8.68x más rápido y el entrenamiento entero apenas 1.29x. **La
-conclusión no es que la GPU no sirva: es que en EvaClock el matmul no es lo que
-domina.** Lo que domina es la recurrencia de ClockMem, que es secuencial en el tiempo
-y se queda en la CPU. Por eso el próximo ítem que mueve la aguja no es afinar más el
-shader sino el **scan asociativo paralelo** — sin eso, optimizar matmul es limar una
-pieza que no es el cuello.
+Un matmul suelto va 8.68x más rápido y el entrenamiento entero apenas 1.29x.
+
+> **CORRECCIÓN (2026-08-11).** Acá decía que el cuello era la recurrencia de
+> ClockMem. **Era falso**, y estaba escrito como un hecho a partir de evidencia
+> indirecta. Al medirlo de verdad con `EVA_PROFILE=1`, ClockMem resultó ser el
+> **0.8%** del tiempo: 2.4 s de 310. Hacerlo infinitamente rápido no cambiaría
+> nada. Tercera vez en el día que la intuición elige mal el cuello; la tabla de
+> abajo es lo que hay que mirar en su lugar.
+
+## Dónde se va el tiempo de verdad
+
+`EVA_PROFILE=1` mide por etiqueta. Entrenamiento dim 512 / ffn 1024, 861 pasos:
+
+| etiqueta        | antes    | con optimizador nuevo | + GPU    |
+|-----------------|----------|-----------------------|----------|
+| matmul          | 135.6 s  | 137.3 s               | 71.4 s   |
+| backward (todo) | 173.7 s  | 172.2 s               | 136.0 s  |
+| optimizador     | 62.7 s   | **22.3 s**            | 22.6 s   |
+| clockmem fwd+bwd| 2.4 s    | 2.4 s                 | 2.4 s    |
+| **reloj**       | 310.2 s  | 269.3 s               | **201.0 s** |
+
+**312 s → 201 s, 1.55x**, sin tocar una sola línea de ClockMem.
+
+El optimizador se llevaba el 20% haciendo algo aburrido: dos pasadas sobre los
+10.7M de parámetros, escalar y en un solo hilo. Fusionadas en una y repartidas
+en bandas sobre el pool: 62.7 → 22.3 s. No dio 8x porque ahora está contra el
+ancho de banda de memoria (171 MB por paso), que es el piso real.
+
+Lo que queda arriba de la lista, con los números en la mano: **el backward sin
+contar matmul, ~96 s, casi la mitad del total**. Eso es maquinaria de autograd
+—asignaciones y clones por operación—, no aritmética.
 
 Está apagado por defecto a propósito: la GPU suma en otro orden, así que dos
 entrenamientos con y sin ella no dan bit a bit lo mismo. Que eso pase tiene que ser
@@ -123,6 +148,9 @@ Están documentadas en el encabezado de cada archivo, pero conviene tenerlas jun
 3. **`gpu/mod.rs`** — staging `HOST_VISIBLE|HOST_COHERENT` sin `HOST_CACHED` es memoria
    **sin caché**: escribirla va bien, leerla desde la CPU va a ~300 MB/s. Bajar el
    resultado se llevaba el 70% del tiempo total. Un flag.
+4. **Creer que el cuello era ClockMem** por evidencia indirecta, escribirlo en este
+   README como un hecho, y que al medirlo fuera el **0.8%**. La evidencia indirecta
+   sirve para elegir qué medir, nunca para concluir.
 
 La moraleja de las tres, y de la que más duele: **la intuición decía "optimizá el
 shader" y eran los flags de memoria.** Medir primero, partido en fases.
@@ -135,7 +163,9 @@ shader" y eran los flags de memoria.** Medir primero, partido en fases.
 - [x] Thread pool persistente (no spawn por matmul)
 - [ ] **Medir todo esto en la RX 580** (los números de arriba son de una GTX 1650)
 - [x] Integrar el matmul de GPU en `math::matmul` como backend opcional (`EVA_GPU=1`), con umbral medido
-- [ ] **Scan asociativo paralelo para ClockMem** — el cuello real del entrenamiento, ver arriba
+- [ ] **Bajar las asignaciones del autograd** — el bucle real: ~96 s de 201, casi la mitad
+- [ ] ~~Scan asociativo paralelo para ClockMem~~ — MEDIDO: ClockMem es el 0.8% del tiempo.
+      Sólo valdría si D fuera chico o para un port de ClockMem a GPU; hoy no mueve la aguja
 - [ ] BPE/tokenizer multilingüe
 - [ ] CUDA: **no**, a propósito
 

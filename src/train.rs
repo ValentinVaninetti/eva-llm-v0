@@ -52,10 +52,10 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
             let loss = crate::tensor::ops::cross_entropy(&logits, &target);
             let loss_v = loss.data[0];
 
-            let grads = backward(&loss);
+            let grads = crate::prof::time(crate::prof::P::Backward, || backward(&loss));
 
             let mut params = model.parameters_mut();
-            opt.step(&mut params, &grads);
+            crate::prof::time(crate::prof::P::Optim, || opt.step(&mut params, &grads));
 
             running += loss_v;
             step += 1;
@@ -84,6 +84,7 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
 
     save_model(&tcfg.out_path, &model).map_err(|e| format!("no se pudo guardar: {}", e))?;
     let elapsed: Duration = t0.elapsed();
+    crate::prof::report(elapsed);
     println!("eva: entrenamiento terminado en {:.1}s, pesos en {}", elapsed.as_secs_f32(), tcfg.out_path);
     Ok(())
 }

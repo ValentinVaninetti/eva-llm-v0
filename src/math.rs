@@ -1,3 +1,5 @@
+use crate::pool::Ptr;
+
 /// A partir de cuánto trabajo conviene la GPU, MEDIDO (GTX 1650, `eva gpu`):
 ///
 /// ```text
@@ -11,6 +13,10 @@
 const GPU_FROM: usize = 4_000_000;
 
 pub fn matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, out: &mut [f32]) {
+    crate::prof::time(crate::prof::P::Matmul, || matmul_inner(a, b, m, k, n, out))
+}
+
+fn matmul_inner(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, out: &mut [f32]) {
     debug_assert_eq!(a.len(), m * k);
     debug_assert_eq!(b.len(), k * n);
     debug_assert_eq!(out.len(), m * n);
@@ -106,31 +112,6 @@ fn gpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, out: &mut [f32
             },
         }
     })
-}
-
-/// Thin wrapper over a raw pointer that is `Send + Sync`. Sound because the
-/// pointers are only used for the disjoint, non-aliasing access of the pool
-/// chunks, and they are guaranteed to outlive the pool call.
-#[derive(Clone, Copy)]
-struct Ptr<T>(T);
-
-unsafe impl<T> Send for Ptr<T> {}
-unsafe impl<T> Sync for Ptr<T> {}
-
-impl Ptr<*const f32> {
-    fn as_ref(self, len: usize) -> &'static [f32] {
-        unsafe { std::slice::from_raw_parts(self.0, len) }
-    }
-}
-
-impl Ptr<*mut f32> {
-    fn add(self, off: usize) -> Ptr<*mut f32> {
-        Ptr(unsafe { self.0.add(off) })
-    }
-
-    fn as_mut(self, len: usize) -> &'static mut [f32] {
-        unsafe { std::slice::from_raw_parts_mut(self.0, len) }
-    }
 }
 
 fn matmul_rows(a: &[f32], b: &[f32], k: usize, n: usize, out: &mut [f32], base: usize, start: usize, end: usize) {

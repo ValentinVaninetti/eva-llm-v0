@@ -193,6 +193,39 @@ fn worker(ctl: Arc<Ctl>, w: usize, nworkers: usize) {
     }
 }
 
+/// Puntero crudo que es `Send + Sync`, para repartir un buffer en bandas.
+///
+/// Existe por una restricción del pool y no por gusto: `run` pide `Send + Sync
+/// + 'static`, así que un `&mut [f32]` de quien llama no entra. Es sano
+/// SÓLO porque `run` no vuelve hasta que terminó cada pieza -- nada de lo que
+/// se arma acá sobrevive al préstamo que lo originó. Si eso cambia, esto se
+/// vuelve un use-after-free.
+#[derive(Clone, Copy)]
+pub struct Ptr<T>(pub T);
+
+unsafe impl<T> Send for Ptr<T> {}
+unsafe impl<T> Sync for Ptr<T> {}
+
+impl Ptr<*const f32> {
+    pub fn as_ref(self, len: usize) -> &'static [f32] {
+        unsafe { std::slice::from_raw_parts(self.0, len) }
+    }
+
+    pub fn at(self, off: usize) -> Ptr<*const f32> {
+        Ptr(unsafe { self.0.add(off) })
+    }
+}
+
+impl Ptr<*mut f32> {
+    pub fn add(self, off: usize) -> Ptr<*mut f32> {
+        Ptr(unsafe { self.0.add(off) })
+    }
+
+    pub fn as_mut(self, len: usize) -> &'static mut [f32] {
+        unsafe { std::slice::from_raw_parts_mut(self.0, len) }
+    }
+}
+
 static POOL: OnceLock<ThreadPool> = OnceLock::new();
 
 pub fn global() -> &'static ThreadPool {

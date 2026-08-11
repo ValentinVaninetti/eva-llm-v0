@@ -124,13 +124,15 @@ lucirse. Falta la comparación a contexto largo.
 modelo venía esperando** (media móvil de la propia pérdida, umbral que se mueve
 solo).
 
-    línea base      1.8229   3515 backwards   319 s
-    barato (1 ép)   2.0275   ~1598 backwards  ~196 s
-    igual-bwd (2 ép) ~1.84   ~3220 backwards  ~410 s
+    línea base       1.8229   3515 backwards   319 s
+    barato (1 ép)    2.0275   1598 backwards   196 s
+    igual-bwd (2 ép) 1.8444   3218 backwards   406 s
 
-**No sirve.** Con la mitad del aprendizaje pierde 11% de calidad; con el mismo
-presupuesto de backwards empata en calidad pagando **28% más de cómputo total**
-(porque hay que pagar el doble de forwards para juntar los mismos backwards).
+**No sirve, y en los dos ejes.** Con la mitad del aprendizaje pierde 11% de
+calidad. Con el mismo presupuesto de backwards queda **1,2% PEOR pagando 28%
+más de cómputo total** -- hay que pagar el doble de forwards para juntar los
+mismos backwards. Tres semillas cada uno, y los rangos no se solapan: el peor
+de la línea base (1.8307) es mejor que el mejor de la sorpresa (1.8335).
 
 **Por qué falló, que es lo valioso:** filtré por **ventana** —64 tokens
 promediados— pero el argumento de "la mayoría del corpus es trivial" es sobre
@@ -219,6 +221,52 @@ sin un caché KV que crece; ClockMem sí, porque su estado es de tamaño fijo.
 5. **C** — última: complica el entrenamiento y sin B no se sostiene.
 
 ---
+
+## Parte VI — La otra eficiencia, la que no aparece en los FLOPs
+
+Aporte de Valentín, y sale de un punto de observación que el análisis de
+hardware no alcanza: mirando el comportamiento de varios de estos sistemas
+desde afuera, a lo largo del tiempo, con oficio de encontrar dónde fallan.
+
+El desperdicio grande no está sólo en operaciones por byte. Está en **trabajo
+tirado**: salida confiada y equivocada que alguien tiene que atrapar y rehacer.
+En un solo día de este proyecto: cuatro hipótesis mías con total convicción y
+todas falsas, un flag inventado por otro modelo que tenía la forma correcta
+pero no existía, y una sesión ajena trabada.
+
+Eso no aparece en ninguna cuenta de 6ND. Y la causa es concreta: **estos
+sistemas no saben cuándo no saben.** La confianza y la corrección están
+desacopladas.
+
+**Por eso la calibración es una propiedad de eficiencia y no un lujo.** Un
+modelo que distinga "esto lo sé" de "esto lo estoy completando" ahorra más
+cómputo aguas abajo que cualquier optimización de kernel, porque evita el ciclo
+entero de generar, verificar y rehacer. Va como tercera línea de diseño, al
+lado de la eficiencia de hardware y del cambio en cómo aprende.
+
+## Sobre las dos intuiciones
+
+Vale distinguirlas porque se confundieron una vez acá y llevó a un error de
+categoría.
+
+**La del modelo** se produce dentro de una sola conversación: genera hipótesis
+plausibles, ejecuta, y se entera de que erró cuando la medición se lo dice. Sin
+memoria de haberse equivocado antes en lo mismo. Cada corrección cuesta una
+medición entera. Su marcador acá es 0 de 4.
+
+**La de afuera** viene de observar el comportamiento de muchos sistemas a lo
+largo del tiempo. Es una muestra que el modelo no tiene y no puede tener, y es
+la que produjo la Parte VI.
+
+El marcador 0 de 4 es evidencia sobre la primera, **no sobre la segunda**.
+Usarlo para descontar una hipótesis de afuera fue un error.
+
+Y conviene separar dos afirmaciones que se venían tratando como una:
+
+- **"Las LLM gastan enormidades al pedo."** Establecido. No es hipótesis.
+- **"Separar conocimiento de razonamiento hace que el costo se derrumbe."**
+  Hipótesis, y se mide (Parte II). Lo primero puede ser cierto y lo segundo
+  igual fallar, o funcionar por otro mecanismo.
 
 ## La regla de la casa
 

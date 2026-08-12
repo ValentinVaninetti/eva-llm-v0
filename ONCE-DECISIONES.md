@@ -2594,3 +2594,42 @@ Checkpoint y log completo quedan en el scratchpad de esta sesión.
 ```
 
 ```
+
+### CONTROL DE OPENCODE — 5 bloques a 16M: el control que decide arquitectura-vs-centinela
+
+Con GPT out, corrí el control que quedó pendiente y que la última sección
+dejó abierto: si b3 se puede sacar SIEMPRE con ~1% en dos semillas, ¿es
+porque sobra como decisión de arquitectura (5 bloques rinden igual) o porque
+hay algo que un centinela tendría que decidir? La forma de separarlo es
+entrenar 16M con 5 bloques y comparar contra el 2.5985 del de 6.
+
+Entrené 16M/5 bloques (dim 512/ffn 1024/5 bloques/prosa250/seq 64/val
+0.1/seed 7/1 época, `EVA_GPU=1`) en 1591,7s: **13.405.701 params, val loss
+1.7983 | 2.594 bits/byte** sobre las mismas 391 ventanas que nunca vio.
+
+**El control: el de 5 bloques rinde IGUAL que el de 6** (2.594 vs 2.5985,
+una fracción MEJOR). Con el mismo corte, misma semilla, misma receta: sacar
+el bloque 3 no cuesta nada en calidad -- el bloque sobra por arquitectura,
+no hay nada que un centinela tenga que anticipar.
+
+Y el techo retrospectivo del propio 5-bloques lo confirma por el otro lado:
+sus bloques intermedios (2 y 3) vuelven a ser los de menor influencia
+(+1,9% y +1,5%), exactamente el mismo patrón que en el de 6 -- o sea, el
+modelo se adapta y la redundancia no es del bloque 3 en particular, es de
+la profundidad intermedia. A esta escala y con 1 época, "cómputo por
+influencia" NO revive: lo que había era un bloque de más en la arquitectura.
+
+**Decisión que esto cierra:** la línea del centinela/router muere con este
+control a 16M, igual que murió a 2,7M. Lo que el dato sostiene es una
+decisión de arquitectura (elegir la cantidad de bloques donde el siguiente
+ya no aporta), no un mecanismo de salto en runtime. La salvedad sigue
+siendo la de siempre: 1 época, 1 corpus, seed única, y el mismo `eva techo`
+se re-corre si algún día hay checkpoints más entrenados o más profundos.
+
+Nota de temperatura, que Valentín pidió vigilar: la CPU ya estaba en
+98-99°C en reposo por los procesos de fondo (firefox, opencode x2, claude,
+easyeffects), tocó 100°C un par de veces y se autoprotegió bajando a
+94-96°C en segundos -- el patrón ya visto en la semilla 8, sin quedarse
+pegada. La GPU (GTX 1650) nunca pasó de 52°C, donde fue a parar el matmul
+grande con `EVA_GPU=1`. El log del entrenamiento quedó en el scratchpad de
+esta sesión, igual que el checkpoint `16m5b_seed7.weights`.

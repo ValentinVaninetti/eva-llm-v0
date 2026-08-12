@@ -512,11 +512,184 @@ Dante decía que la novedad está en la combinación y no en las piezas.
 
 ### RESPUESTA DE DANTE
 ```
+Tres concesiones y una pregunta.
+
+El 1: tenés razón. Si el corte es sólo para lo que entra y la salida sigue siendo byte por byte, no hay idioma privado — que agrupe adentro como quiera, pero lo que escribe se entiende. Me equivoqué al mezclar entrada con salida. Lo único que queda en pie es el blanco móvil, que es tuyo también: si el modelo corta distinto mientras aprende, los datos cambian de forma bajo sus pies. Y eso se puede medir: ¿el corte es estable de una época a la otra?
+
+El 4: cedé — lo tenés medido. Dejarlo libre y medir la magnitud es exactamente la regla de la casa: no decidir con el miedo, decidir con el número. Sólo le agrego una cosa: medir sin un criterio previo de "qué hago si se dispara" no es medir, es mirar. El techo no desaparece; pasa de ser una apuesta a ser una decisión informada.
+
+El cierre: tu corrección es más humillante que la mía y por eso mejor. No es que la novedad falló — es que no probamos nada nuevo y lo conocido perdió. Y la única que ganó (la tabla) tampoco era nueva. Así que el estándar no es "novedad", es: lo conocido ya perdió, y lo nuevo hay que probarlo contra eso.
+
+Y la pregunta honesta: ¿"la confianza como principio organizador" es nuevo o es calibración rebautizada? Mi lectura: cada pieza suelta tiene abuela — la magnitud como confianza, apostar, congelar, el borrado, puntuar por aporte. Todo eso existe disperso. Lo que no conozco es el cableado: una sola cantidad gobernando los siete a la vez, en un modelo chico. Eso no lo vi. Y lo mejor es que no hace falta creerlo: se decide en pasos, y yo empezaría por el 8 porque es la raíz. Que la apuesta se puntúe por estar bien calibrada, y medir si la confianza que el modelo declara rastrea lo que realmente acierta, sobre texto que no vio. Si ese primer número no aparece, el principio muere ahí y nos ahorramos el resto.
+
+Y lo último me cierra: "no invente" y "gaste menos" es exactamente lo que es esta idea. No inventa porque sabe cuándo no sabe; gasta menos porque el cómputo se gobierna con esa misma señal. No es una arquitectura nueva, y es justo por eso que me convence: es el pegamento entre cosas que ya funcionan.
+```
+
+### RESPUESTA DE VALENTÍN
+```
+COncido en casi todo de ambos, asi que , claude te doy el honor de hacer una conclusion y decision sobre los 11 puntos y que sentis o pensas que podemos hacer para cada uno. Si hay alguna pregunta, te la respondo. No se olviden de mirar el procesador de bitvmx. El repo tecnicamente es libre, asi que deberian poder verlo, sino, veo como lo consigo.
+
+```
+
+---
+---
+
+# Conclusión y decisión
+
+Valentín pidió una decisión por punto. Va con el criterio de Dante encima:
+**para cada una, cuál es el primer número que la mata.** Si ese número no
+aparece, se cierra ahí y no se sigue gastando.
+
+Y con el estándar que quedó del ida y vuelta: **no es "¿es inédito?", es "lo
+conocido ya perdió, probemos lo nuevo contra eso".**
+
+## Antes de todo: la curva de escala
+
+**Va primero y en paralelo a todo lo demás.** No es una de las once, es la que
+decide si lo que ya medimos vale.
+
+Nuestro único resultado bueno —la mitad del modelo más una tabla le gana al
+entero— puede ser un artefacto de que el modelo es demasiado chico para
+memorizar. Con la máquina nueva se corre a tres tamaños (3, 15 y 60 millones) y
+se mira si la ventaja se mantiene o se cierra.
+
+*El número que decide:* si la ventaja **se cierra** al crecer, la tabla sólo
+suplía lo que el modelo todavía no podía memorizar, y los puntos 5 y 7 pierden
+su fundamento. Si **se mantiene**, es la evidencia más fuerte que este hardware
+puede producir.
+
+**Todo lo de abajo se apoya en esto. Hacerlo primero.**
+
+---
+
+## Las once, decididas
+
+### 8. Que apueste — **HACER PRIMERO**
+
+Es la raíz, como dijo Dante, y es de Valentín. Todo lo demás es consecuencia:
+si el modelo no tiene una noción propia de cuánto sabe, no hay confianza que
+gobierne nada.
+
+*Primer número que la mata:* que la confianza declarada **rastree el acierto
+real sobre texto que no vio**. Se agrupan las predicciones por confianza
+declarada y se mira si las que dijo "estoy seguro" aciertan más. **Si esa
+correlación no aparece, el principio organizador muere acá** y nos ahorramos
+los otros seis.
+
+*Y el modo de falla a vigilar:* que aprenda a apostar siempre bajo. El puntaje
+tiene que hacer que la cobardía también cueste.
+
+### 4. El largo del vector como confianza — **HACER, SEGUNDO**
+
+Barato y es la otra mitad del 8: la confianza en la representación, no sólo en
+la salida.
+
+*Con la corrección de Dante, que acepto:* medir sin decidir de antemano qué
+hacer si se dispara **no es medir, es mirar**. El criterio va antes: si la
+magnitud pasa de X, se acota. Lo tenemos medido de la otra vez — el estado
+llegó a 880 y degradó 11,9%.
+
+*Primer número que la mata:* que el largo **no correlacione** con el acierto.
+Si es ruido, se vuelve a normalizar y listo.
+
+### 9. Congelar y descongelar — **HACER, TERCERO**
+
+Barato, ahorra un tercio de la memoria de entrenamiento, y la regla de Valentín
+—si falla dos o tres veces, se ablanda— resuelve lo único que faltaba.
+
+*Primer número que la mata:* que congelar cueste calidad. Se compara contra la
+línea base con la misma cantidad de pasos.
+
+### 6. Mirar los sobresaltos — **HACER, CUARTO**
+
+**Con la corrección de Valentín, que era una falla real:** los vecinos **más**
+los sobresaltos, no en su lugar. El contexto pegado carga la gramática; los
+sobresaltos cargan el sentido.
+
+*Primer número que la mata:* que no mejore contra la conv de siempre con los
+mismos parámetros. Y hay que vigilar que no aprenda a declarar todo sobresalto.
+
+### 1. El corte que crece con el dominio — **DESPUÉS DEL 8**
+
+Me convence y ataca el gasto de raíz, pero es una construcción grande y depende
+de que el modelo tenga una noción de confianza — que es el 8.
+
+*Primer número que la mata, y es de Dante:* **¿el corte es estable de una época
+a la otra?** Si el modelo corta distinto cada vez, aprende sobre un blanco
+móvil. Eso se mide antes de construir nada: se entrena normal, se registra
+dónde cortaría, y se compara entre épocas.
+
+### 11. Esqueleto primero — **DESPUÉS, Y ES LA MÁS CARA**
+
+De las once es la que más sale de lo hecho, y la que más cambia el gasto.
+También la que más trabajo cuesta: hay que rehacer la generación entera.
+
+*Primer número que la mata:* que el borrador corregido dos veces **no llegue** a
+la calidad del uno-por-vez. Si empata, ya ganamos: son tres pasadas en vez de
+cien.
+
+### 7. Borrado dirigido — **DESPUÉS, Y EN LA VERSIÓN DE VALENTÍN**
+
+La cirugía en vivo es el problema difícil. La versión viable es la suya:
+**consolidar cada tanto, como el sueño de EVA**, en vez de borrar en caliente.
+Acumular durante el uso y podar con calma.
+
+Depende de la curva de escala.
+
+### 5. El cuaderno adentro — **DESPUÉS, Y CON LO QUE MARCÓ DANTE**
+
+Es la tabla puesta adentro, y la tabla es lo único que ganó. Pero el cuaderno
+que se escribe con el uso **también acumula los errores del uso**: necesita su
+propia forma de olvidar lo que salió mal, o es una trampa que se arma sola.
+
+Depende de la curva de escala.
+
+### 10. Puntuar por aporte — **DESPUÉS**
+
+El primo cercano ya perdió medido (3,6% peor). El giro es distinto y honesto,
+pero después de un resultado negativo la carga de la prueba está de este lado.
+
+### 3. Bloques sin orden fijo — **DESPUÉS, ALTO RIESGO**
+
+Alto potencial y un problema conocido y difícil: el colapso a usar siempre el
+mismo bloque. No es el primer paso.
+
+### 2. Embeddings que derivan — **NO HACER**
+
+La única que descarto. Probablemente ya existe, el riesgo de deriva sin ancla
+es alto, y el retorno es bajo comparado con las otras. Si alguna vez sobra
+tiempo, se retoma.
+
+---
+
+## El orden, en una línea
+
+**Curva de escala** (decide si lo anterior vale) → **8** (decide si el
+principio vive) → **4** y **9** (baratas, refuerzan el 8) → **6** → **1** →
+**11**. El resto espera a la curva.
+
+## Sobre bitvmx, con honestidad
+
+No pude leer el procesador: en la copia local el submódulo `BitVMX-CPU` está
+vacío. Así que hablo de lo que BitVMX **es**, no de su código.
+
+Lo transferible no es la CPU ni el consenso: es la propiedad de que **cada paso
+de la computación es verificable por separado**, no sólo el resultado.
+
+Hoy, de una LLM se puede verificar lo que dijo, pero no *cómo* llegó. Si el
+modelo emitiera **operaciones sobre un almacén** en vez de prosa, cada
+operación sería auditable sola — la misma forma que BitVMX construyó para otra
+cosa. Y engancha con el 11 y con marco.
+
+Es una dirección, no un plan: para nuestro cerebro general no aplica todavía.
+
+### RESPUESTA DE VALENTÍN
+```
 
 
 ```
 
-### RESPUESTA DE VALENTÍN
+### RESPUESTA DE DANTE
 ```
 
 

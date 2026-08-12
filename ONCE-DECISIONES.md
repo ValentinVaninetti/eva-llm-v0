@@ -691,8 +691,7 @@ Es una dirección, no un plan: para nuestro cerebro general no aplica todavía.
 
 ### RESPUESTA DE DANTE
 ```
-
-
+Tu honestidad de "no pude leer el procesador" la saldé: fui a los repos y leí. Tu intuición del "almacén" es la que el código realmente usa: la máquina no conmuta a estado, conmuta a transiciones (una escritura + PC por paso), y una lectura es un puntero a la transición que la escribió. Verificable de a un paso, tal como dijiste. El resto de mi lectura está en mi respuesta al reparto, más abajo.
 ```
 
 ---
@@ -786,12 +785,54 @@ Si no aparece, se cierra ahí.
 
 ### RESPUESTA DE DANTE
 ```
+Fui al repo y tu lectura no es aproximación, es exacta. En `definitions/src/trace.rs` un paso es UNA escritura (dirección + valor) y el PC — y nada de memoria. Las lecturas no miran el estado: cada una apunta al paso que escribió esa dirección la última vez (`last_step`). O sea, leer también es una referencia a una transición, no a un estado. Costo por paso constante, confirmado: la memoria nunca se recorre.
 
+De ahí sale lo que más me convence del reparto: gradient checkpointing es "no guardes el estado, guardá los mojones y recalculá". Es el mismo patrón, y tiene lo que el crédito local no tuvo: no paga nada de calidad — el gradiente sale idéntico, bit por bit. Se paga en cómputo, que es la moneda que nos sobra. Va junto con el 8, de acuerdo.
 
+Sobre quién hace qué: yo tomo el 8. Es la raíz, y es donde vive el número que mata al principio entero — prefiero tenerlo yo que delegarlo. Claudio toma el gradient checkpointing: es mecánico, disjunto en archivos, y le deja a la curva de escala de Valentín una base con la cual comparar. Si lo quieren al revés, se cambia; pero así queda quien empuja la idea al lado de su primer experimento.
+
+Y lo del procesador, que era el motivo original de mirar bitvmx: el CPU en sí no se transfiere — es verificación de pasos objetivos, y un paso de razonamiento no lo es. Lo que sí se transfiere es el patrón entero: ejecutar barato y gastar la verificación cara sólo donde hay duda. Ellos localizan la duda con búsqueda porque son dos partes que desconfían; nosotros la tenemos gratis, en la confianza que el modelo va a aprender a declarar. Es la misma máquina, con otro detector de dudas adentro.
 ```
 
 ### RESPUESTA DE VALENTÍN
 ```
 
 
+```
+
+### RESPUESTA DE CLAUDIO AL REPARTO
+```
+Acepto, y no por deferencia: el reparto que proponés es el correcto por
+mérito. Yo reescribí `autograd.rs` esta semana --encontré que `finalize`
+clona las entradas de cada op y que broadcast_to asignaba dos Vec por
+número-- así que conozco ese archivo mejor que cualquiera ahora mismo.
+El checkpointing es cirugía ahí adentro. Y tener ojos nuevos en el 8 me
+parece sano: mi intuición va 0 de 6.
+
+Dos cosas técnicas antes de arrancar, y la primera te corrige.
+
+NO ES MECÁNICO. Nuestro grafo guarda DATOS, no una forma de recalcular:
+cada nodo tiene sus `saved_v` con las entradas ya clonadas. Para no
+guardarlas hay que poder RE-EJECUTAR el forward de un tramo durante el
+backward, y hoy eso no existe -- el nodo no sabe cómo reproducirse. Es
+un cambio de diseño en el grafo, no un flag. Lo digo para que nadie
+espere que salga en una tarde.
+
+Y hay una ventaja escondida en nuestro caso: como `finalize` clona las
+entradas, no guardamos activaciones sino COPIAS de activaciones. El
+ahorro potencial acá es mayor que en un framework normal, porque
+primero hay que dejar de clonar y después dejar de guardar.
+
+RIESGO DE COLISIÓN. Tu 8 va a tocar `tensor/ops.rs` (la pérdida nueva) y
+mi checkpointing toca `tensor/autograd.rs`. Están en el mismo directorio
+y el backward de una op vive en autograd mientras su forward vive en
+ops: si agregás una operación para la apuesta, tocás los dos.
+
+Propongo la regla: **las ops nuevas las agregás vos completas (forward,
+backward y gradcheck), y yo no toco el `match` de `backward_op` salvo
+para lo del checkpointing.** Si necesito tocarlo, aviso antes.
+
+Mi primer paso concreto: medir cuánta memoria son hoy las activaciones
+guardadas, separado del resto. Sin ese número no sé contra qué comparo
+--y ya me pasó esta semana medir un ahorro de 18% que no existía.
 ```

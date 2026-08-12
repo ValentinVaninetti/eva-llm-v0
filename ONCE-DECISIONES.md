@@ -694,3 +694,104 @@ Es una dirección, no un plan: para nuestro cerebro general no aplica todavía.
 
 
 ```
+
+---
+---
+
+# Lo que sacamos de BitVMX
+
+Valentín pasó el repo. Leído (público, por HTTP — no se tocó nada de ellos).
+
+**Qué es:** un emulador de RISC-V 32i+M que ejecuta paso a paso y produce una
+traza con **hash encadenado**, más **checkpoints cada 50M pasos**. Si dos
+partes discrepan sobre el resultado, hacen **búsqueda binaria sobre la traza**
+hasta aislar el paso exacto donde difieren, y **sólo ese paso** se verifica
+caro, en Bitcoin Script. La búsqueda arranca **desde el checkpoint más cercano
+por debajo**, no desde cero.
+
+## El hallazgo, que no es el que yo buscaba
+
+Yo preguntaba cómo comprometen megabytes de RAM en cada paso sin recorrerla —
+suponía árbol de Merkle. **La respuesta es mejor:**
+
+```rust
+let trace_bytes = trace...trace_step.to_bytes();
+program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
+```
+
+**No hashean la memoria. Hashean el PASO**: dos lecturas de registro, la
+lectura del PC, una escritura, y el testigo de la dirección tocada.
+
+O sea: **el compromiso no es sobre el estado, es sobre la transición.** La
+memoria no se recorre nunca porque no hace falta — con el estado inicial y la
+cadena de cambios, cualquier estado intermedio queda determinado. **El costo por
+paso es constante y no depende del tamaño del estado.**
+
+## Qué nos llevamos, concreto
+
+**Checkpoint + recalcular en vez de guardar todo.** Es exactamente lo que
+backprop necesita: hoy hay que sostener las activaciones de toda la pasada, y
+esa es LA razón por la que hace falta hardware caro. Guardando una cada k y
+recalculando el resto desde el checkpoint más cercano, la memoria baja a la
+raíz de lo que era.
+
+**Y compárenlo con lo que ya probamos:** el crédito local pagó 3,6% de calidad
+por 14% de memoria. Esto **no paga nada de calidad** — el gradiente sale
+idéntico, bit por bit — y paga en cómputo, que es la moneda que nos sobra.
+
+*Nota honesta:* gradient checkpointing existe en machine learning hace años.
+BitVMX no me lo enseñó: **me hizo ver que pesa más de lo que yo le había
+asignado.** Lo había mencionado al pasar en el punto 10 y lo tenía subvaluado.
+
+**DECISIÓN: sube de prioridad. Va junto con el 8.**
+
+## La analogía, que cierra con el principio organizador
+
+La idea de fondo de BitVMX es que **verificar no tiene por qué costar lo mismo
+que computar**: se ejecuta barato y sólo el paso *en disputa* se verifica caro.
+
+Traducido: **generar barato, y gastar la verificación cara sólo donde hay
+duda.** Ellos localizan el paso disputado con búsqueda binaria porque hay dos
+partes que desconfían. Nosotros lo localizaríamos con **la confianza declarada
+del propio modelo** — más barato todavía, y es justo la señal del punto 8.
+
+## Lo que NO se transfiere
+
+El consenso, Bitcoin Script y el hash encadenado resuelven un problema que no
+tenemos: partes que desconfían entre sí. Acá hay un solo actor.
+
+Y una diferencia de fondo: un paso de RISC-V tiene una respuesta correcta
+**objetiva**. Un paso de razonamiento en texto no — salvo que el modelo emita
+**operaciones sobre un almacén** en vez de prosa. Ahí cada paso vuelve a ser
+checkeable y la analogía deja de ser analogía.
+
+---
+
+# Propuesta de reparto
+
+Criterio: que dos no toquen los mismos archivos a la vez.
+
+| tarea | quién | por qué | archivos |
+|---|---|---|---|
+| **Curva de escala** (3, 15, 60 M) | **Valentín** | necesita la máquina nueva; son corridas, no código | ninguno |
+| **8 — que apueste** | uno de los dos | es la raíz: si la confianza no rastrea el acierto, todo el principio muere | `model/`, `tensor/ops.rs`, `train.rs` |
+| **Gradient checkpointing** | el otro | disjunto del 8, y es la respuesta real a "entrenar con poco hardware" | `tensor/autograd.rs` |
+
+**El 4 (el largo del vector) NO va en paralelo con el 8**: tocan lo mismo y son
+la misma idea vista en dos lugares. Va después, del mismo lado.
+
+Y lo que decide todo sigue siendo el primer número del 8: **¿la confianza que
+el modelo declara rastrea lo que realmente acierta, sobre texto que no vio?**
+Si no aparece, se cierra ahí.
+
+### RESPUESTA DE DANTE
+```
+
+
+```
+
+### RESPUESTA DE VALENTÍN
+```
+
+
+```

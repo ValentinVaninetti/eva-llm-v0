@@ -131,6 +131,29 @@ impl EvaModel {
     /// construcción (el punto entero de la decisión 4 es que esa información
     /// se tira), así que medirla post-norma sería medir ruido.
     pub fn forward_hidden(&self, ids: &[usize]) -> (Tensor, Tensor) {
+        self.forward_skip(ids, None)
+    }
+
+    /// Igual que `forward_hidden`, pero con la opción de OMITIR un bloque: la
+    /// señal que usa el benchmark `techo` (el techo retrospectivo del cómputo
+    /// por influencia).
+    ///
+    /// `skip = None` es exactamente `forward_hidden`. `skip = Some(i)` deja
+    /// pasar la corriente residual por el bloque i como identidad: lo que el
+    /// modelo pierde así es lo que ese bloque aporta. Vive en el modelo y no
+    /// en el benchmark a propósito: la lógica del bloque se define una sola
+    /// vez, en su `forward`, y esto sólo decide si se llama.
+    pub fn forward_skip(&self, ids: &[usize], skip: Option<usize>) -> (Tensor, Tensor) {
+        match skip {
+            Some(i) => self.forward_skips(ids, &[i]),
+            None => self.forward_skips(ids, &[]),
+        }
+    }
+
+    /// Variante experimental de `forward_hidden` que omite varios bloques.
+    /// Sólo la usa `techo` para medir una combinación REAL en una pasada;
+    /// no es una política de inferencia ni cambia el camino normal.
+    pub fn forward_skips(&self, ids: &[usize], skips: &[usize]) -> (Tensor, Tensor) {
         let mut x = self.embed.embed(ids);
         if let Some(pos) = &self.pos {
             // En generación la ventana crece de a un token, así que el corte
@@ -138,7 +161,10 @@ impl EvaModel {
             let n = ids.len().min(self.cfg.seq_len);
             x = ops::add(&x, &ops::slice_rows(pos, n));
         }
-        for b in &self.blocks {
+        for (i, b) in self.blocks.iter().enumerate() {
+            if skips.contains(&i) {
+                continue;
+            }
             x = b.forward(&x);
         }
         let hidden = x.clone();

@@ -17,6 +17,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "info" => cmd_info(&args[1..]),
         "gpu" => cmd_gpu(&args[1..]),
         "recall" => cmd_recall(&args[1..]),
+        "techo" => cmd_techo(&args[1..]),
         "bet" => cmd_bet(&args[1..]),
         "stake" => cmd_stake(&args[1..]),
         "settle" => cmd_settle(&args[1..]),
@@ -154,6 +155,98 @@ fn cmd_recall(args: &[String]) -> Result<(), String> {
         .map(|(k, p)| format!("{k}:{p:.0}%"))
         .collect();
     println!("  de dónde vienen los aciertos: {}", perfil.join("  "));
+    Ok(())
+}
+
+/// 7. EL TECHO — el primer número del cómputo por influencia.
+///
+/// Mide, sobre texto que no vio, cuánto cuesta quitar cada bloque por
+/// separado: si hay un bloque que se puede saltar perdiendo poco, hay espacio
+/// real para un mecanismo que lo anticipe; si quitar cualquiera destruye la
+/// calidad, la línea muere acá sin escribir el planificador.
+fn cmd_techo(args: &[String]) -> Result<(), String> {
+    check_unknown(args, &["weights", "data", "val", "skip"])?;
+    let weights = flag(args, "weights").ok_or("techo requiere --weights")?;
+    let data = flag(args, "data").ok_or("techo requiere --data")?;
+    let model = load_model(&weights).map_err(|e| e.to_string())?;
+    let val: f32 = flag_num(args, "val", 0.1)?;
+
+    let ds = crate::data::TextDataset::from_file(&data, model.cfg.seq_len).map_err(|e| e.to_string())?;
+    let n = ds.num_windows();
+    if n == 0 {
+        return Err("el dataset es muy chico para el seq_len del modelo".into());
+    }
+    let n_val = (((n as f32) * val).round() as usize).clamp(1, n / 2);
+    let n_train = n - n_val;
+
+    if let Some(raw) = flag(args, "skip") {
+        let mut skips: Vec<usize> = raw.split(',').map(|s| s.trim().parse::<usize>()
+            .map_err(|_| format!("--skip inválido: '{raw}' (ejemplo: 2,3,4)")))
+            .collect::<Result<_, _>>()?;
+        skips.sort_unstable();
+        if skips.windows(2).any(|w| w[0] == w[1]) {
+            return Err("--skip no puede repetir bloques".into());
+        }
+        println!("eva: el modelo tiene que haberse entrenado con --val {val:.1} para no haber visto validación");
+        let r = crate::techo::medir_combinacion(&model, &ds, n_train, n, &skips)?;
+        println!("eva: COMBINACIÓN REAL, bloques omitidos {:?} (una pasada)", r.skips);
+        println!("  completo       {:.4} bits/byte | {:.2} ms", r.full_bits_per_byte, r.full_time_s * 1e3);
+        println!("  combinación    {:.4} bits/byte | {:+.4} ({:+.1}%) | argmax cambia {:.1}%",
+            r.bits_per_byte, r.delta_bits, 100.0 * r.rel_delta, 100.0 * r.pred_change);
+        println!("  tiempo real    {:.2} ms | ahorro real {:.1}% | pesos no leídos {:.1} KB",
+            r.time_total_s * 1e3, 100.0 * (r.full_time_s - r.time_total_s) / r.full_time_s.max(1e-12),
+            r.weight_bytes as f64 / 1024.0);
+        return Ok(());
+    }
+    println!("eva: modelo {} params | {} bloques | arch {} | dim {} ffn {} kernel {} | seq {}",
+        model.param_count(), model.blocks.len(), model.cfg.arch.name(),
+        model.cfg.dim, model.cfg.ffn_dim, model.cfg.conv_kernel, model.cfg.seq_len);
+    println!("eva: {} ventanas, {} entrenadas, {} validación (corte contiguo al final)",
+        n, n_train, n_val);
+    println!("eva: el modelo tiene que haberse entrenado con --val {val:.1} para no haber visto validación");
+    println!("eva: cada variante se corre una vez por ventana, estado en cero (convención de bet)");
+
+    let rep = crate::techo::medir(&model, &ds, n_train, n)?;
+
+    println!("\n=== TECNO RETROSPECTIVO (un bloque afuera por vez, texto no visto) ===");
+    println!("  {n_val} ventanas, {} posiciones | completo {:.4} bits/byte en {:.2} ms",
+        rep.n_pos, rep.full_bits_per_byte, rep.full_time_s * 1e3);
+    println!("  variante       bits/byte   Δ bits/byte   pred cambia   tiempo     ahorra   pesos no leídos");
+    println!("  completo       {:.4}         —              —          {:6.2} ms      —          —",
+        rep.full_bits_per_byte, rep.full_time_s * 1e3);
+    for b in &rep.blocks {
+        println!("  sin bloque {:<2}    {:.4}      {:+.4} ({:+.1}%)   {:6.1}%     {:6.2} ms  {:5.1}%     {:6.1} KB",
+            b.idx, b.bits_per_byte, b.delta_bits, 100.0 * b.rel_delta,
+            100.0 * b.pred_change, b.time_total_s * 1e3,
+            100.0 * b.block_time_s / rep.full_time_s,
+            b.weight_bytes as f64 / 1024.0);
+    }
+
+    println!("\n=== REGLAS IDEALES (retrospectivas — el techo máximo, no lo que un centinela lograría) ===");
+    println!("  la pérdida proyectada de saltar varios es la SUMA de las individuales; la combinación");
+    println!("  junta se corre aparte si el techo da. Cada bloque cuesta lo mismo en pesos.");
+    for umbral in [0.01f32, 0.02, 0.05] {
+        let (_, t, w, proyectado) = crate::techo::regla_ideal(&rep, umbral);
+        let quien: Vec<String> = rep
+            .blocks
+            .iter()
+            .filter(|b| b.rel_delta <= umbral)
+            .map(|b| format!("b{}", b.idx))
+            .collect();
+        let quien = if quien.is_empty() { "ninguno".to_string() } else { quien.join(", ") };
+        println!("  pérdida ≤ {:>3.0}%  → salta [{}]  ahorra {t:5.1}% del tiempo, {w:4.1}% del peso | proyectado {proyectado:.4} bits/byte",
+            100.0 * umbral, quien);
+    }
+
+    let (saltar, t, _, _) = crate::techo::regla_ideal(&rep, 0.05);
+    if saltar > 0 {
+        println!("\n  VEREDICTO: hay bloque(s) que se pueden saltar perdiendo ≤5% de bits/byte →");
+        println!("  espacio real para cómputo condicional (techo {t:.1}% del tiempo).");
+        println!("  Siguiente paso: cómo anticipar la influencia sin pagar el bloque.");
+    } else {
+        println!("\n  VEREDICTO: quitar cualquier bloque cuesta más del 5% de bits/byte →");
+        println!("  techo bajo, la línea del cómputo condicional muere acá.");
+    }
     Ok(())
 }
 
@@ -435,6 +528,7 @@ fn print_help() {
          \x20 eva train --data <archivo> [opciones]\n\
          \x20 eva gen --weights <archivo> [--prompt texto] [--tokens N] [--temp F] [--topk N]\n\
          \x20 eva info --weights <archivo>\n\
+         \x20 eva techo --weights <archivo> --data <archivo> [--val F]\n\
          \x20 eva bet --weights <archivo> --data <archivo> [--val F] [--bins N]\n\
          \x20 eva stake --weights <archivo> --data <archivo> [--span N] [--epochs N] [--lr F]\n\
          \x20 eva help\n\n\

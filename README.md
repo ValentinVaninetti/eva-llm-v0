@@ -252,6 +252,7 @@ cargo run --release -- train --data data.txt --epochs 20 --dim 256 --seq 64
 cargo run --release -- gen --weights eva.weights --prompt "hola "
 cargo run --release -- info --weights eva.weights
 cargo run --release -- bet --weights eva.weights --data data.txt --val 0.1
+cargo run --release -- stake --weights eva.weights --data data.txt --span 16
 ```
 
 ## Cómo modificarlo

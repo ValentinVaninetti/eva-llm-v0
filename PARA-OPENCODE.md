@@ -233,6 +233,7 @@ cargo test --release -- --ignored     # 2 más, piden GPU con Vulkan
 cargo run --release -- train --data data/prosa250.txt --arch clock \
     --epochs 1 --dim 256 --ffn 512 --blocks 4 --seq 64 --val 0.1 --seed 7
 cargo run --release -- recall --weights X.weights --data data/prosa250.txt
+cargo run --release -- techo --weights X.weights --data data/prosa250.txt
 cargo run --release -- gpu --m 1024 --k 1024 --n 1024 --iters 30
 ```
 

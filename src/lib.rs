@@ -18,6 +18,7 @@ pub mod save;
 pub mod settle;
 pub mod stake;
 pub mod stream;
+pub mod techo;
 pub mod tensor;
 pub mod tokenizer;
 pub mod train;

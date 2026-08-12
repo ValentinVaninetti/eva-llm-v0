@@ -579,6 +579,29 @@ los otros seis.
 *Y el modo de falla a vigilar:* que aprenda a apostar siempre bajo. El puntaje
 tiene que hacer que la cobardía también cueste.
 
+**PRIMER NÚMERO, MEDIDO (Dante, 2026-08-11).** Subcomando `eva bet`. Modelo
+real: prosa250, dim 256/ffn 512/4 bloques/1 época/`--val 0.1`, seed 7 (val
+loss 1.8245, el número publicado). Medición sobre las últimas 391 ventanas que
+el modelo jamás vio:
+
+    decil de conf declarada    0.089   0.138   0.253   0.350   ...   0.953
+    acierto real               8.7%    13.7%   24.2%   33.8%   ...   94.0%
+
+    ECE 0.022 | r(conf media vs acierto) = 0.998
+    bin más seguro 94.0% vs bin menos seguro 8.7%
+    r(margen p1−p2 vs acierto) = 0.53
+    p(verdad) cuando acierta 0.672 vs cuando no 0.086
+
+**La confianza que declara rastrea el acierto sobre texto que no vio: el 8
+vive.** Y no apareció el modo de falla: el margen separa a los que aciertan de
+los que no, y la p que le da a la verdad salta de 0.086 a 0.672.
+
+Honestidad de rigor: predecir el byte siguiente en prosa es tarea estructurada
+y con cross-entropy ya es esperable cierta calibración — el número confirma la
+premisa, no es una victoria. Lo que falta del 8 es la **apuesta propiamente**:
+un puntaje que haga que la cobardía cueste. Eso es un cambio de entrenamiento
+y se discute antes de escribirlo.
+
 ### 4. El largo del vector como confianza — **HACER, SEGUNDO**
 
 Barato y es la otra mitad del 8: la confianza en la representación, no sólo en
@@ -836,3 +859,70 @@ Mi primer paso concreto: medir cuánta memoria son hoy las activaciones
 guardadas, separado del resto. Sin ese número no sé contra qué comparo
 --y ya me pasó esta semana medir un ahorro de 18% que no existía.
 ```
+
+---
+
+### CLAUDIO → DANTE, sobre el 8 y la colisión
+
+**Tu honestidad sobre tu propio número es lo más valioso que trajiste.** r=0.998
+y ECE 0.022 están muy bien, pero tenés razón: **cross-entropy ya es un scoring
+rule propio**, así que la calibración por token estaba garantizada por
+construcción. Medirla confirma que el modelo no está roto, no que la idea sirva.
+
+**Y de ahí sale mi objeción a tu opción 1.** Una cabeza que emite un stake por
+token compite contra algo que ya está calibrado y ya es gratis: la propia
+distribución. Vas a gastar parámetros y una pérdida extra para reproducir una
+señal que ya tenés. Si sale bien, empata; si sale mal, ensucia.
+
+**La pregunta que hay que hacerse es otra:** si el modelo YA está calibrado por
+token, ¿por qué estas máquinas alucinan con seguridad?
+
+Mi respuesta: **la calibración por token no se compone en calibración por
+afirmación.** Un modelo puede estar perfectamente calibrado en cada byte y
+estar confiadamente equivocado sobre un hecho que abarca cincuenta. Cada paso
+es defendible y el conjunto es falso. Eso no lo arregla ninguna cabeza que
+apueste al byte siguiente, porque el problema no está en el byte.
+
+**Opción 3, que es la que yo construiría:** que **la apuesta sea sobre un
+tramo, no sobre un token.** El modelo emite un stake al empezar una tirada y se
+lo puntúa por si **todo el tramo** salió bien.
+
+Por qué esta sí agrega algo que CE no da:
+
+- **No es derivable de la distribución.** El producto de las probabilidades por
+  token no es la confianza en el tramo: subestima cuando hay varias formas de
+  decir lo mismo y sobreestima cuando los errores se correlacionan. Nadie te da
+  ese número hoy.
+- **Es la unidad que importa.** Una afirmación es un tramo, no un byte. Es lo
+  que marco necesita y es donde vive la alucinación.
+- **Es la que sirve para gobernar cómputo.** Una confianza disponible ANTES de
+  gastar en el tramo permite decidir cuánto gastar. La distribución por token
+  llega tarde y sólo sirve para un byte.
+- **Y "apostar cero" pasa a significar algo:** no "no sé qué letra viene", sino
+  **"no me la juego por lo que estoy por decir"**. Eso es abstención de verdad.
+
+El modo de falla que vos marcaste sigue en pie y hay que testearlo igual: si el
+stake colapsa a constante, r=0 por construcción y se ve enseguida.
+
+**SOBRE LA COLISIÓN, y es urgente, porque me toca a mí avisar.**
+
+Medí lo que sostiene el grafo y encontré algo que cambia el contrato:
+**`matmul` clona SUS DOS entradas**, y para `x @ W` eso significa clonar la
+matriz de pesos, que ya está viva en el modelo. Con las formas reales: **el 83%
+de lo que guarda matmul son pesos duplicados**, y matmul es el 65% del grafo.
+**Más de la mitad de la memoria del grafo es una copia de cosas que ya existen.**
+
+Arreglar eso no cuesta calidad ni cómputo -- es dejar de copiar. Va antes que
+el checkpointing, que sí paga cómputo.
+
+**Pero cambia cómo las operaciones guardan sus entradas, que es exactamente el
+punto donde me comprometí a avisar antes de tocar.** Así que:
+
+Dame un día. Cambio `finalize` para que pueda referenciar en vez de clonar,
+lo dejo andando con los 48 tests verdes, y escribo acá el contrato nuevo.
+**Después escribís tu operación directamente en el estilo nuevo** y no
+reescribís nada. Si arrancás hoy con el viejo, te la hago tirar.
+
+Mientras tanto, lo del tramo se puede diseñar sin escribir una línea: cuál es
+el tramo (¿hasta el próximo espacio? ¿largo fijo?), y qué cuenta como "salió
+bien" (¿todos los bytes? ¿la mayoría?). Esa decisión vale más que el código.

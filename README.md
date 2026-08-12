@@ -251,6 +251,7 @@ shader" y eran los flags de memoria.** Medir primero, partido en fases.
 cargo run --release -- train --data data.txt --epochs 20 --dim 256 --seq 64
 cargo run --release -- gen --weights eva.weights --prompt "hola "
 cargo run --release -- info --weights eva.weights
+cargo run --release -- bet --weights eva.weights --data data.txt --val 0.1
 ```
 
 ## Cómo modificarlo

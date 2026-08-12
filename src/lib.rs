@@ -1,3 +1,4 @@
+pub mod bet;
 pub mod cli;
 pub mod constrain;
 pub mod data;

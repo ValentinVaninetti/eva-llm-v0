@@ -9,6 +9,21 @@ pub struct Input {
     pub node: Option<Arc<Node>>,
 }
 
+impl Node {
+    /// Bytes que este nodo sostiene vivos.
+    fn peso(&self) -> usize {
+        self.saved_v.iter().map(|v| v.len() * 4).sum::<usize>()
+            + self.saved_f.len() * 4
+            + self.saved_u.len() * std::mem::size_of::<usize>()
+    }
+}
+
+impl Drop for Node {
+    fn drop(&mut self) {
+        crate::tensor::held::sale(self.peso());
+    }
+}
+
 pub struct Node {
     pub op: &'static str,
     pub inputs: Vec<Input>,
@@ -34,16 +49,9 @@ pub fn make_node(
         .iter()
         .map(|t| Input { id: t.id, len: t.numel(), node: t.node.clone() })
         .collect();
-    Arc::new(Node {
-        op,
-        inputs,
-        grad_flags,
-        saved_v,
-        saved_f,
-        saved_u,
-        out_id,
-        out_len,
-    })
+    let n = Node { op, inputs, grad_flags, saved_v, saved_f, saved_u, out_id, out_len };
+    crate::tensor::held::entra(op, n.peso());
+    Arc::new(n)
 }
 
 pub fn backward(out: &Tensor) -> HashMap<usize, Vec<f32>> {

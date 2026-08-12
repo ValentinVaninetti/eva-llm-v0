@@ -163,6 +163,7 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
 
     save_model(&tcfg.out_path, &model).map_err(|e| format!("no se pudo guardar: {}", e))?;
     println!("eva: pico de memoria del proceso {:.1} MB", crate::local::peak_rss_mb());
+    crate::tensor::held::informe(total_params);
     if n_val > 0 {
         // Con estado limpio: comparable con cualquier corrida.
         let vl = eval_loss(&model, &ds, n_train, n_windows);

@@ -17,6 +17,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "info" => cmd_info(&args[1..]),
         "gpu" => cmd_gpu(&args[1..]),
         "recall" => cmd_recall(&args[1..]),
+        "bet" => cmd_bet(&args[1..]),
         "help" | "-h" | "--help" => {
             print_help();
             Ok(())
@@ -154,6 +155,69 @@ fn cmd_recall(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// 8. QUE APUESTE — el primer número que lo mata.
+///
+/// Mide si la confianza que el modelo DECLARA rastrea lo que realmente
+/// acierta, sobre texto que no vio. El corte es el mismo contiguo que usó
+/// `train`: las últimas `--val` ventanas son el examen, nunca tocadas.
+fn cmd_bet(args: &[String]) -> Result<(), String> {
+    check_unknown(args, &["weights", "data", "seq", "val", "bins", "train"])?;
+    let weights = flag(args, "weights").ok_or("bet requiere --weights")?;
+    let data = flag(args, "data").ok_or("bet requiere --data")?;
+    let model = load_model(&weights).map_err(|e| e.to_string())?;
+    let seq = flag_num(args, "seq", model.cfg.seq_len)?;
+    let val: f32 = flag_num(args, "val", 0.1)?;
+    let bins = flag_num(args, "bins", 10)?;
+    let medir_train = args.iter().any(|a| a == "--train");
+
+    let ds = crate::data::TextDataset::from_file(&data, seq).map_err(|e| e.to_string())?;
+    let n = ds.num_windows();
+    if n == 0 {
+        return Err("el dataset es muy chico para el seq_len del modelo".into());
+    }
+    let n_val = (((n as f32) * val).round() as usize).clamp(1, n / 2);
+    let n_train = n - n_val;
+    println!("eva: {} ventanas, {} entrenadas, {} validación (corte contiguo al final)",
+        n, n_train, n_val);
+    println!("eva: el modelo tiene que haberse entrenado con --val {val:.1} para no haber visto validación");
+
+    if medir_train {
+        let t = crate::bet::measure(&model, &ds, 0, n_train, bins);
+        print_calibration(&t, "ENTRENAMIENTO (texto que el modelo SÍ vio)", bins);
+    }
+    let exam = crate::bet::measure(&model, &ds, n_train, n, bins);
+    print_calibration(&exam, "VALIDACIÓN (texto que el modelo NO vio)", bins);
+    Ok(())
+}
+
+fn print_calibration(cal: &crate::bet::Calibration, titulo: &str, bins: usize) {
+    let acc = cal.accuracy();
+    println!("\n=== {titulo} ===");
+    println!("  {:<4} {:>8} {:>10} {:>10}", "bin", "n", "conf", "acierto");
+    for b in 0..bins {
+        if cal.bin_n(b) == 0 {
+            continue;
+        }
+        println!("  {:<4} {:>8} {:>10.3} {:>10.1}%",
+            b, cal.bin_n(b), cal.bin_conf(b), 100.0 * cal.bin_accuracy(b));
+    }
+    println!("  acierto global {:.1}%  |  ECE {:.3}", 100.0 * acc, cal.ece());
+    println!("  r(conf media vs acierto por bin) = {:.3}", cal.bin_corr());
+    if let Some((top, bottom)) = cal.top_vs_bottom() {
+        println!("  acierto bin más seguro {:.1}%  vs  bin menos seguro {:.1}%",
+            100.0 * top, 100.0 * bottom);
+    }
+    println!("  r(margen vs acierto) = {:.3}", cal.margin_r());
+    let (yes, no) = cal.pt_calibration();
+    println!("  p(verdad) cuando acierta {:.3}  vs  cuando no {:.3}", yes, no);
+    let r = cal.bin_corr();
+    let voto = match (r, cal.top_vs_bottom()) {
+        (r, Some((top, bottom))) if r >= 0.5 && top > bottom => "LA CONFIANZA RASTREA EL ACIERTO -> el 8 vive",
+        _ => "LA CONFIANZA NO RASTREA EL ACIERTO -> el 8 muere acá",
+    };
+    println!("  VEREDICTO: {voto}");
+}
+
 fn cmd_gpu(args: &[String]) -> Result<(), String> {
     check_unknown(args, &["m", "k", "n", "iters"])?;
     let m = flag_num(args, "m", 512)?;
@@ -273,6 +337,7 @@ fn print_help() {
          \x20 eva train --data <archivo> [opciones]\n\
          \x20 eva gen --weights <archivo> [--prompt texto] [--tokens N] [--temp F] [--topk N]\n\
          \x20 eva info --weights <archivo>\n\
+         \x20 eva bet --weights <archivo> --data <archivo> [--val F] [--bins N]\n\
          \x20 eva help\n\n\
          OPCIONES DE TRAIN:\n\
          \x20 --seq N       ventana de contexto (default 64)\n\

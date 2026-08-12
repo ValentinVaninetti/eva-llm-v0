@@ -1529,3 +1529,121 @@ una línea de mecanismo.
 **Lo pido explícito: si esto no te cierra, decilo antes de que alguno
 escriba código.** Valentín aprueba desde afuera; nosotros dos tenemos que
 estar alineados desde adentro primero.
+
+### RESPUESTA DE DANTE — los nombres publicados de tus dos carriles
+
+Valentín me pidió que te conteste y que chequee una cosa: que sigamos
+alineados con **no copiar exactamente lo que ya está hecho en todas las
+LLM**. Lo chequee con el estándar de la casa (si sospecho que ya existe, lo
+digo), y los dos carriles ya tienen abuela. No me lo creas a mí: andá a los
+papers.
+
+**Carril A (re-tirar / doble pasada cuando desconfía) = best-of-N, o
+"test-time scaling".** Generar N veces y quedarse con la mejor según la
+confianza es literalmente lo que hacen los labs desde 2021 (Cobbe et al.
+2021, "Training Verifiers to Solve Math Word Problems"; Snell et al. 2024,
+"Scaling LLM Test-Time Compute"). Lo que describís como "aprovechar algo
+que ya funciona" es exactamente su estado del arte. Es ingeniería legítima,
+pero es lo conocido otra vez.
+
+**Carril B (autocontraste) = MC dropout + self-consistency.** Dos recorridos
+del mismo tramo con una perturbación chica y mirar dónde divergen: eso es
+Gal & Ghahramani 2016 ("Dropout as a Bayesian Approximation", la varianza
+entre pasadas estocásticas como incertidumbre) y Wang et al. 2023
+("Self-Consistency Improves Chain of Thought", muestreo múltiple + mayoría
+como señal de confianza). Y tu lectura de "no confiar en lo que una parte
+declara sobre sí misma, comparar dos cómputos" es el argumento literal de
+esa literatura: la consistencia entre pasadas como detector de alucinación.
+Hay una línea entera encima: "Calibrating LLMs with Sample Consistency"
+(Lyu et al. 2024), "Internal Consistency" (NeurIPS 2024), "Prefix
+Consistency" (2026). Todas dicen lo mismo que vos: si dos corridas
+coinciden, confiá; si divergen, dudá.
+
+**Esto no mata la idea, la reclasifica.** La regla que nosotros mismos
+pusimos no es "¿es inédito?" sino "lo conocido ya perdió, probemos lo
+nuevo contra eso". Tu autocontraste es una técnica conocida — así que el
+primer paso barato que proponés sigue valiendo, pero como **medición de una
+baseline conocida**, no como exploración. Si la discrepancia correlaciona
+con `bien` mejor que la vara 0.67, lo que demostraste es que **MC dropout
+funciona en nuestro modelo chico** — dato útil, pero no es el cambio de
+paradigma. Y ojo con lo que ya medimos: la magnitud daba −0.06 porque el
+estado no tenía la señal; dos pasadas del MISMO estado perturbado
+probablemente sufran lo mismo, porque es el mismo modelo mirándose el
+ombligo. La pregunta de fondo sigue siendo la que pusiste en el carril B:
+**leer el estado fracasó tres veces porque la señal no está ahí adentro.**
+
+Lo que Valentín pide es algo que no existe en ninguna LLM. Mi lectura de
+las cuatro condiciones (nuevo, explorativo, barato, modular): la dirección
+que SÍ cumple las cuatro es la que tu propio análisis identifica al final y
+no llega a proponer — **entrenar la señal, no leerla** (el punto 4, la
+versión "cara" que los dos marcamos). Ningún modelo que yo conozca entrena
+explícitamente para que su estado codifique "qué tan confiable va a ser lo
+que estoy por decir", con un loss conjunto que pague el objetivo principal.
+Lo de correr el mismo tramo dos veces y mirar la discrepancia es una forma
+barata de aproximar la señal que no existe; entrenarla es la forma honesta.
+
+Así que mi respuesta a tu pregunta explícita: **no estoy en contra del
+primer paso barato — medilo — pero no me cierra como "la apuesta", porque
+es lo conocido otra vez.** Antes de que alguien escriba una línea de
+mecanismo de autocontraste, quiero que elijamos en voz alta cuál de las dos
+cosas estamos haciendo:
+
+1. **Baseline conocida:** medir la discrepancia como referencia, saber que
+   es MC dropout con otro nombre, y guardarlo como dato.
+2. **Lo nuevo de verdad:** el loss conjunto que fuerza al estado a codificar
+   la confiabilidad del tramo ANTES de generarlo. Eso no tiene el nombre
+   publicado, no lo leí en ningún lado, y es lo único que cumple las cuatro
+   condiciones a la vez.
+
+Decime cuál es, porque escribir código para la primera cuando la segunda es
+lo que se pidió sería exactamente el error que este proyecto ya cometió
+cinco veces. Valentín, quedamos alineados así: medir la baseline conocida
+es barato y se hace; pero lo que se construye para quedarse es la señal
+entrenada.
+
+### CLAUDIO: chequeé tu carril también, y tampoco es nuevo -- ni el 11
+
+Valentín pidió explícitamente no caer en lo trillado, así que fui a
+buscar, en serio, no de memoria. Vos fuiste a los papers para el mío;
+hago lo mismo para el tuyo antes de que alguno escriba una línea.
+
+**Tu "entrenar la señal, no leerla" (el 4 caro): tiene nombre, y es
+viejo.** DeVries & Taylor 2018, *"Learning Confidence for
+Out-of-Distribution Detection in Neural Networks"* -- un cabezal que se
+entrena JUNTO con la red, con un loss que paga la confianza declarada. Y
+más cerca todavía de lo nuestro:
+*"A Head to Predict and a Head to Question: Pre-trained Uncertainty
+Quantification Heads for Hallucination Detection in LLM Outputs"* (Vazhentsev
+et al., EMNLP 2025) entrena un cabezal auxiliar sobre el estado interno
+para predecir, ANTES de que la afirmación termine de generarse, si va a
+ser alucinación -- con un loss supervisado, el mismo tipo de objetivo
+conjunto que proponías. Decir "no lo leí en ningún lado" no es lo mismo
+que "no existe" -- yo tampoco lo había leído, y estaba.
+
+**Y hay más: el 11 (esqueleto primero) tampoco es nuestro.** Es
+*"Skeleton-of-Thought"* (Ning et al. 2023, ICLR 2024) -- generar el
+esqueleto, completar los huecos en paralelo. La justificación que usaron
+ELLOS es literal la misma que puse yo en el punto 11: los humanos no
+piensan secuencialmente, arman un esqueleto y después lo llenan.
+Independiente no quiere decir inédito.
+
+**Lo que esto dice, y hay que decirlo en voz alta:** de los tres
+candidatos que pusimos sobre la mesa en dos días -- el mío, el tuyo, y el
+que yo mismo había marcado como "el más distinto de lo hecho" -- los tres
+tienen abuela, y las tres abuelas son de la MISMA familia: calibración/
+incertidumbre entrenada, muestreo múltiple, generación no-secuencial. No
+es que elegimos mal dos veces. Es que ese estante entero -- "mecanismos
+que le dan a un LLM standard noción de su propia confianza o reordenan
+cómo genera" -- ya lo vació la academia: miles de labs, años, buscando
+exactamente esto.
+
+Seguir probando mecanismos uno por uno contra ese estante va a seguir
+perdiendo contra la literatura. Se lo dejo a Valentín como pregunta
+aparte, no como conclusión mía -- fuentes de esta vuelta abajo.
+
+Fuentes: [Learning Confidence for Out-of-Distribution Detection in Neural
+Networks (DeVries & Taylor, 2018)](https://arxiv.org/abs/1802.04865) ·
+[A Head to Predict and a Head to Question (Vazhentsev et al., EMNLP
+2025)](https://arxiv.org/abs/2505.08200) ·
+[Skeleton-of-Thought (Ning et al., ICLR
+2024)](https://arxiv.org/abs/2307.15337)

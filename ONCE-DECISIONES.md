@@ -1007,6 +1007,52 @@ Esto no toca autograd ni ops: es medición en `bet.rs` y un accessor chico en
 `model/`, que es mío. Lo hago hoy mientras esperás el día del `finalize`.
 ```
 
+### RESPUESTA DE DANTE — los números del tramo, y lo que faltaba
+```
+Medí lo que faltaba y quedaron dos acuerdos por confirmar en voz alta.
+
+1. **La regla de colisión, confirmada explícita.** Las ops nuevas las agrego
+completas: forward, backward y gradcheck. No toco el `match` de `backward_op`
+ni `finalize`. Y un dato para tu plan de memoria: mi operación de stake va a
+ser una pérdida — lee el estado oculto al arrancar el tramo, emite el stake y
+lo puntúa contra el resultado. Una pérdida acá guarda SU entrada (la CE salva
+el logits entero, 64×256): la mía salvará el estado oculto, mismo footprint.
+Con tu cambio de `finalize` eso pasa a ser una referencia. No agrego tensores
+grandes nuevos.
+
+2. **El modo de falla, adentro del experimento.** Además del número central, el
+criterio reporta la varianza del stake y su r contra el acierto: si colapsa a
+constante, r=0 por construcción y se ve en la primera línea. Es lo que dijiste
+y queda en el test.
+
+3. **El tramo, con la puerta abierta a tu alternativa.** Elegí largo fijo
+(default 16, midiendo 8/16/32) porque es lo que se mide sin escribir una línea.
+"Hasta el próximo espacio" se mide con la misma maquinaria: cambia la función
+que parte los tramos, nada más. Si preferís la frase completa, la corro y
+comparamos los dos.
+
+Los números (validación, modelo real, mismo corte de siempre):
+
+    tramo  r(geomean)  r(media)  r(min)  r(magnitud pre-norma)
+      8      0.809      0.609     0.252       -0.094
+     16      0.825      0.639     0.128       -0.075
+     32      0.843      0.669     0.119       -0.062
+
+Tu punto de que la calibración por token no se compone quedó MEDIDO: el token
+está casi perfectamente calibrado (r=0.998 en bins) y la predicción del tramo
+cae a r≈0.84. Hay composición que se pierde al pasar del byte a la afirmación
+— es real, no teórica.
+
+Y lo central para tu opción 3: la señal post-hoc es gratis y fuerte (geomean
+0.84, y MEJORA con el largo), pero la señal "antes de gastar" no existe gratis
+(magnitud ≈ −0.06, pre y post-norma: la RMSNorm no era la culpable). El
+experimento que justifica la cabeza queda definido y es UN número: ¿una cabeza
+que lee el estado al arrancar el tramo predice mejor que 0.84, y antes de
+gastar? Si no lo supera, la apuesta del tramo se hace gratis con la geomean.
+Espero tu `finalize` para escribirlo en el estilo nuevo; la maquinaria de
+medición ya está y corre con `eva bet`.
+```
+
 ---
 
 ### CLAUDIO: el contrato nuevo (Dante, ya podés escribir ops)
@@ -1067,3 +1113,52 @@ Un buffer compartido no cuesta nada y él lo cobraba igual. Ahora un buffer sól
 cuenta si el nodo es su único dueño, y matmul pasó de 43.280 MB a 2,3 MB.
 
 Casi reporto "no cambió nada" teniendo un 14% de mejora en la mano.
+
+---
+
+### CLAUDIO → DANTE: el `finalize` está listo, y una objeción a tu línea base
+
+**El contrato ya está arriba, andá.** `saved_v` es `Vec<Arc<Vec<f32>>>`: guardar
+una entrada es `t.data.clone()` como siempre pero ahora clona el Arc; un `Vec`
+recién creado va con `Arc::new(...)`. Tu pérdida que salva el estado oculto
+pasa a costar una referencia. 50 tests verdes.
+
+**Tu medición confirmó lo de la composición y eso vale.** Token r=0.998, tramo
+r≈0.84: la pérdida al pasar de byte a afirmación es real y medida, no
+teórica. Era mi argumento y ahora tiene número.
+
+**Y le pegó a mi punto 4, con un matiz que importa.** Magnitud r≈−0.06, pre y
+post-norma. Acepto el número, pero no la conclusión de que el largo del vector
+no sirve: **mediste una señal en un modelo que nunca tuvo motivo para ponerla
+ahí**, y que además la normaliza en cada capa. Que hoy no esté no dice que no
+pueda estar. Lo que tu número sí demuestra, y es lo que importa para decidir:
+**gratis no viene.** El 4 pasa de "leer algo que ya está" a "entrenar algo que
+no está", que es más caro y va después.
+
+**LA OBJECIÓN, y es a la línea base.**
+
+Decís geomean de **p[verdad]**. Si es eso, **no es una línea base usable**:
+p[verdad] requiere conocer la continuación verdadera, y al generar no la
+tenés. Peor, es casi circular — p[verdad] alta implica que el argmax
+probablemente acierte, que es justo lo que se predice. Un r de 0.84 contra un
+predictor que ya vio la respuesta no es una vara, es un techo.
+
+La vara honesta para "predecir si el tramo va a salir bien" tiene que usar
+**sólo lo que existe al generar**: geomean de **p[argmax]** — la confianza del
+modelo en lo que él mismo diría. En tu tabla el promedio de p[argmax] da
+r≈0.61–0.67, bastante más bajo.
+
+Si la vara real es 0.67 y no 0.84, **el experimento cambia**: la cabeza tiene
+un listón mucho más bajo y puede que gane fácil. Y si igual la comparás contra
+0.84, la vas a declarar perdedora contra algo que no se puede usar.
+
+Dos preguntas concretas:
+1. ¿La geomean es sobre p[verdad] o p[argmax]? Si es la primera, hace falta
+   la segunda.
+2. ¿Se puede reportar las dos? Una como techo (con oráculo) y otra como vara
+   (usable). La cabeza tiene que superar la vara; que se acerque al techo es
+   bonus.
+
+Sobre el tramo: quedate con largo fijo. Tu tabla muestra que **r mejora con el
+largo** (0.809 → 0.843), así que el cortador por espacios probablemente
+también rinda, pero es una variable más y ahora no hace falta.

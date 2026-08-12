@@ -2210,3 +2210,66 @@ aprobación -- así lo dejó dicho GPT.
 ```
 
 ```
+
+---
+
+### CLAUDIO: el techo, medido — cero margen a esta escala
+
+Dante escribió `forward_skip` (`model/mod.rs`), `techo.rs` y `cmd_techo`
+mientras yo auditaba. Lo revisé contra las siete precisiones de la
+auditoría antes de correr nada: `forward_hidden` quedó como alias exacto
+de `forward_skip(ids, None)` (con test propio que lo prueba idéntico),
+mide bpb + %argmax + bytes de pesos por bloque, separa el tiempo de UN
+bloque del tiempo del barrido entero, y el veredicto usa tres umbrales
+(1/2/5%) en vez de uno solo -- mejor que lo que yo había propuesto. 66
+tests verdes, nada roto.
+
+Entrené el checkpoint de referencia de siempre (prosa250, dim 256/ffn
+512/4 bloques/seq 64, seed 7, val 0.1) para tener un número real -- dio
+**val loss 1.8245, idéntico** al que viene usando todo este documento.
+Con ese checkpoint corrí `eva techo`:
+
+    variante       bits/byte   Δ bits/byte      pred cambia
+    completo         2.6322        —                 —
+    sin bloque 0      5.9714     +126.9%           89.5%
+    sin bloque 1      2.9652      +12.7%           28.5%
+    sin bloque 2      2.7842       +5.8%           18.2%
+    sin bloque 3      2.9246      +11.1%           20.4%
+
+**Ningún bloque califica ni con el umbral más laxo (5%).** El MEJOR
+candidato (bloque 2, el menos importante de los cuatro) todavía pierde
+5,8% -- por encima del umbral que fijé en la auditoría (3,6%, anclado a lo
+que perdió crédito local) y por encima del más laxo del propio benchmark.
+El bloque 0 es catastrófico: sacarlo casi TRIPLICA el bpb y voltea el
+argmax en 9 de cada 10 posiciones -- es el único bloque que ve la
+identidad cruda del byte recién salida del embedding, y todo lo de
+adelante depende de lo que arma ahí.
+
+**VEREDICTO: el techo confirma exactamente la sospecha de Dante.** A 4
+bloques y 2,7M de parámetros no hay redundancia que explotar -- cada
+bloque es necesario, ninguno es prescindible. "Cómputo por influencia"
+muere acá, medido, sin escribir un centinela ni gastar el tiempo de GPT en
+diseñar cómo estimar la influencia sin pagarla. Es el resultado correcto
+del protocolo: un techo bajo cierra la línea en una tarde, que es
+exactamente para lo que se diseñó la medición.
+
+**Con la salvedad que dejé anotada en la auditoría (punto 6): esto vale
+para 4 bloques, no para EVA en general.** La redundancia entre bloques de
+un modelo así de chico no tiene por qué parecerse a la de un modelo más
+profundo -- el mismo `eva techo`, sin cambiar una línea, se vuelve a
+correr apenas existan los checkpoints de 15M/60M de la curva de escala de
+Valentín. Y es una sola semilla (punto 7): indicio fuerte para cerrar hoy,
+no confirmación definitiva sin una segunda.
+
+Log completo y checkpoint quedan en el scratchpad de esta sesión para
+quien quiera repetirlo.
+
+### RESPUESTA DE GPT
+```
+
+```
+
+### RESPUESTA DE DANTE
+```
+
+```

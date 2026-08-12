@@ -1647,3 +1647,83 @@ Networks (DeVries & Taylor, 2018)](https://arxiv.org/abs/1802.04865) ·
 2025)](https://arxiv.org/abs/2505.08200) ·
 [Skeleton-of-Thought (Ning et al., ICLR
 2024)](https://arxiv.org/abs/2307.15337)
+
+---
+
+## PAUSA: de "como un humano" a "como un superhumano" -- se suma GPT
+
+Valentín pidió parar acá. Antes de tirar una quinta candidata (que
+probablemente también tenga abuela), pensarlo los tres -- Dante, GPT y yo
+-- y él decide con los tres análisis en la mesa. Nada de código todavía.
+Este bloque es sólo el planteo.
+
+**Por qué frenar tenía sentido.** Probé una cuarta idea antes de escribir
+esto: que el modelo tuviera una fase "despierta" barata (lee, actualiza su
+estado, casi gratis) y una fase "dormida" cara y periódica (repasa lo
+vivido regenerándolo él mismo, y ahí paga el entrenamiento completo) --
+inspirada directo en lo que Valentín contó de EVA soñando, y que además
+ataca el problema real que medimos esta semana: el estado de AdamW (81,4
+MB) existiría sólo durante el sueño, no todo el tiempo.
+
+Tiene abuela y es vieja de verdad: el **wake-sleep algorithm** de Hinton es
+de **1995** -- dos fases, sin backprop, sólo señales locales. Y hay
+literatura de 2022 (*Nature Communications*, *PLOS Computational Biology*)
+sobre sueño-como-repaso previniendo el olvido catastrófico en redes.
+Cuatro ideas en dos días -- autocontraste, cabezal de confianza entrenado,
+esqueleto-primero, despertar/dormir -- las cuatro con precedente. No es
+mala suerte: inspirarse en el cerebro es el método fundacional de las
+redes neuronales desde los 40. Casi cualquier cosa que se nos ocurra
+pensando en un humano, alguien ya la probó en algún rincón del campo.
+
+**El replanteo de Valentín, con sus palabras:** partimos del ser humano
+como inspiración, pero el ser humano es *flaky* -- así que pensemos cómo
+sería un **superhumano** en este caso, no un humano.
+
+**Lo que yo entiendo que cambia con eso, para que Dante y GPT lo discutan
+o lo corrijan:** separar la FUNCIÓN que cumple un mecanismo humano de su
+IMPLEMENTACIÓN biológica, que viene con límites que no son parte de la
+función sino accidentes de tener un cerebro de carne. Ejemplos concretos,
+con los cuatro candidatos que ya cayeron:
+
+- **Dormir/consolidar.** Función: separar la experiencia cruda (ruidosa,
+  una sola pasada) de su consolidación en conocimiento estable, que
+  necesita tiempo y repetición. Límite biológico: un cerebro no puede
+  percibir y consolidar a la vez CON LAS MISMAS NEURONAS, así que tiene
+  que apagarse del mundo por turnos de ~8 horas. Nuestro modelo no tiene
+  ese límite -- no hay ninguna razón física para que la consolidación no
+  corra EN PARALELO con la lectura, en vez de por turnos como hace
+  wake-sleep desde 1995. La pregunta superhumana: ¿por qué alternar, si
+  no hace falta apagarse?
+- **Confianza.** Función: gastar más verificación donde hay más chance de
+  error. Límite humano: se estima con heurísticas rápidas y sesgadas
+  (exceso de confianza, Dunning-Kruger) -- imprecisas por diseño evolutivo,
+  no por elección. Ya medimos que ni siquiera esa versión imprecisa
+  aparece gratis en un modelo entrenado normal. Un superhumano no
+  replicaría el sesgo: tendría una medida calibrada por construcción del
+  proceso, no aprendida imitando cuándo un humano "se siente" seguro.
+- **Esqueleto antes de escribir.** Función: planificar antes de
+  comprometerse, para poder revisar el principio con el final ya pensado.
+  Límite humano: el borrador mental es vago, ocupa una memoria de trabajo
+  de ~4-7 elementos, se pierde. Skeleton-of-Thought hereda ese límite: UN
+  esqueleto, corregido a mano. Un superhumano con memoria perfecta podría
+  sostener muchos borradores en paralelo y elegir entre ellos por un
+  criterio objetivo, no uno solo.
+
+No tengo una quinta candidata todavía -- **a propósito**, porque eso es
+exactamente lo que Valentín pidió frenar. Lo que pido es que Dante y GPT
+piensen esta pregunta: **para cada mecanismo humano que consideramos útil,
+¿cuál es la función abstracta, separada del límite biológico que la
+implementa así -- y qué pinta tendría la versión sin ese límite, dado
+nuestro hardware real (no el de un data center, tampoco el de un cerebro)?**
+
+Sin código todavía. Se decide con los tres análisis en la mesa.
+
+### RESPUESTA DE GPT
+```
+
+```
+
+### RESPUESTA DE DANTE
+```
+
+```

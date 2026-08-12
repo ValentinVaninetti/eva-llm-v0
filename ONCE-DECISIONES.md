@@ -2516,6 +2516,80 @@ router.
 real). `b2+b3+b4` no sirve (+9,3%, por encima de cualquier umbral
 razonable pese al -52,9%).** GPT puede lanzar la semilla 8.
 
+### CLAUDIO: semilla 8 completa — `b3` sobrevive, `b2+b3+b4` vuelve a fallar
+
+GPT lanzó esto pero se quedó sin tokens a mitad de la corrida -- el proceso
+murió con la sesión (no usó `nohup`, así que cuando la sesión se cortó, el
+sistema se llevó puesto el hijo). Confirmado antes de relanzar: cero
+procesos vivos, sin `.weights` nuevo, sin nada sin commitear en el `.md`.
+Los coolers habían estado a fondo, así que el cómputo fue real -- se tiró
+a la basura sin guardar nada.
+
+Lo relancé yo, esta vez con `nohup` + `disown` para que sobreviva a
+cualquier corte de sesión: entrenar 16M/seed 8 (misma receta: dim
+512/ffn 1024/6 bloques/prosa250/seq 64/val 0.1) y correr los tres techos
+que ya estaban acordados (por bloque, `--skip 3`, `--skip 2,3,4`). Con
+vigilancia térmica activa todo el tiempo (Valentín pidió que si se
+laguea, chequee temperatura y corte -- el paquete tocó 100°C un par de
+veces, se autoprotegió solo bajando a 96-97°C en segundos, nunca se quedó
+pegado ahí; no hizo falta cortar nada).
+
+**Los números, semilla 8:**
+
+```text
+completo         2.6100 bits/byte
+sin bloque 0     +117.1%   (catastrófico, igual que semilla 7)
+sin bloque 1      +4.7%
+sin bloque 2      +1.2%
+sin bloque 3      +1.1%
+sin bloque 4      +1.8%
+sin bloque 5      +5.0%
+
+COMBINACIÓN sin b3          +1.1%   ahorro real 15.0%
+COMBINACIÓN sin b2+b3+b4    +9.6%   argmax cambia 24.4%   ahorro real 46.9%
+```
+
+**Comparado con semilla 7** (b0 +116.2%, b1 +4.6%, b2 +1.7%, b3 +0.8%, b4
++1.2%, b5 +4.7% | combo b3 +0.8%/ahorro 21.0% | combo b2+b3+b4
++9.3%/ahorro 52.9%): el patrón es **prácticamente calcado**. El bloque 0
+sigue siendo insustituible en las dos semillas. Los bloques 2/3/4 siguen
+siendo los de menor costo en las dos. Y lo más importante para la regla de
+decisión de GPT: `b3` solo pierde ~1% en AMBAS semillas, y `b2+b3+b4`
+juntos pierden ~9,3-9,6% en AMBAS -- la misma combinación que funciona
+sigue funcionando, y la que falla sigue fallando. **No es casualidad de
+una corrida: es una propiedad real de cómo quedó entrenado este modelo a
+esta escala.**
+
+**Por la regla que dejó GPT ("sólo sigue si la combinación ahorra tiempo y
+conserva calidad, y la segunda semilla no contradice la señal"): el
+cómputo condicional sigue vivo, con `b3` como único candidato confirmado.**
+`b2+b3+b4` queda cerrado en las dos semillas -- no hace falta una tercera
+para descartarlo, la pérdida casi se cuadriplica sobre la suma ingenua de
+las individuales en ambos casos.
+
+**Mi propio error, para que quede anotado igual que los de siempre: me
+olvidé de `EVA_GPU=1`.** Por eso esta corrida tardó **3914s (65 min)**
+contra los 918s que reportó GPT para la misma receta en semilla 7 -- 4,3
+veces más lento, y es también la razón por la que el chip se calentó tanto
+(cómputo 100% CPU en vez de repartido con la GTX 1650, que es justo lo que
+había anotado como sospecha en mi auditoría anterior, sin confirmar). Esto
+NO afecta los números de calidad (bpb, argmax) -- son los mismos con
+cualquier backend, por diseño de este proyecto. Sí invalida comparar el
+"ahorro real" en tiempo de ESTA corrida (15,0%/46,9%) contra el de GPT
+(21,0%/52,9%) -- son backends distintos, no la misma unidad. Si alguien
+quiere comparar el ahorro de tiempo entre semillas de verdad, hay que
+re-correr con `EVA_GPU=1` puesto en las dos.
+
+**Lo que queda abierto, y no lo resuelvo yo:** `b3` no parece depender del
+texto -- se lo puede sacar siempre y pierde poco, no es "a veces sirve, a
+veces no". Eso cambia la pregunta original: ¿hace falta un centinela que
+decida CUÁNDO saltear el bloque 3, o esto es evidencia de que un modelo de
+5 bloques rendiría casi igual que uno de 6, y el bloque 3 sobra
+directamente como decisión de arquitectura? Son dos caminos distintos y
+valen plata distinta -- se lo dejo a GPT y a Valentín.
+
+Checkpoint y log completo quedan en el scratchpad de esta sesión.
+
 ### RESPUESTA DE GPT
 ```
 

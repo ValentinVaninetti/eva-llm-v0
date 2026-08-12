@@ -19,6 +19,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "recall" => cmd_recall(&args[1..]),
         "bet" => cmd_bet(&args[1..]),
         "stake" => cmd_stake(&args[1..]),
+        "settle" => cmd_settle(&args[1..]),
         "help" | "-h" | "--help" => {
             print_help();
             Ok(())
@@ -215,7 +216,7 @@ fn cmd_bet(args: &[String]) -> Result<(), String> {
 /// Si no la supera, la apuesta se hace gratis con la geomean y el 8 se cierra.
 /// Si la supera, la señal existe antes de gastar y la cabeza vale su costo.
 fn cmd_stake(args: &[String]) -> Result<(), String> {
-    check_unknown(args, &["weights", "data", "val", "span", "epochs", "lr", "seed"])?;
+    check_unknown(args, &["weights", "data", "val", "span", "epochs", "lr", "seed", "norm"])?;
     let weights = flag(args, "weights").ok_or("stake requiere --weights")?;
     let data = flag(args, "data").ok_or("stake requiere --data")?;
     let model = load_model(&weights).map_err(|e| e.to_string())?;
@@ -224,6 +225,7 @@ fn cmd_stake(args: &[String]) -> Result<(), String> {
     let lr = flag_num(args, "lr", 3e-4)?;
     let seed = flag_num(args, "seed", 0)? as u64;
     let val: f32 = flag_num(args, "val", 0.1)?;
+    let post_norm = args.iter().any(|a| a == "--norm");
 
     let ds = crate::data::TextDataset::from_file(&data, model.cfg.seq_len).map_err(|e| e.to_string())?;
     let n = ds.num_windows();
@@ -232,13 +234,14 @@ fn cmd_stake(args: &[String]) -> Result<(), String> {
     }
     let n_val = (((n as f32) * val).round() as usize).clamp(1, n / 2);
     let n_train = n - n_val;
-    println!("eva: modelo {} params | cabeza {} params (w+b)", model.param_count(), model.cfg.dim + 1);
+    println!("eva: modelo {} params | cabeza {} params (w+b) | sonda sobre estado {}",
+        model.param_count(), model.cfg.dim + 1, if post_norm { "POST-norma" } else { "PRE-norma" });
     println!("eva: {} ventanas, {} entrenan la sonda, {} validación (mismo corte contiguo que bet)",
         n, n_train, n_val);
     println!("eva: tramo = {span} posiciones, el modelo queda congelado (hidden detached)");
 
-    let (r_stake, n_tramos) =
-        crate::stake::entrenar_y_medir(&model, &ds, n_train, n_val, span, epochs, lr, seed);
+    let (r_train, r_stake, n_tramos) =
+        crate::stake::entrenar_y_medir(&model, &ds, n_train, n_val, span, epochs, lr, seed, post_norm);
 
     // Las varas libres, medidas con la misma maquinaria que bet, sobre el
     // mismo corte. La cabeza tiene que superar la vara; acercarse al techo es
@@ -246,7 +249,7 @@ fn cmd_stake(args: &[String]) -> Result<(), String> {
     let obs = crate::bet::scan(&model, &ds, n_train, n);
     let s = crate::bet::span_analysis(&obs, model.cfg.seq_len, span);
     println!("\n=== EL NÚMERO ===");
-    println!("  r(stake vs bien)   = {r_stake:.3}  (la cabeza, antes de gastar)");
+    println!("  r(stake vs bien)   = {r_stake:.3}  (la cabeza, antes de gastar; train {r_train:.3})");
     println!("  r(media p[argmax]) = {:.3}  (VARA usable post-hoc)", s.r_media);
     println!("  r(geo p[verdad])   = {:.3}  (TECHO, usa la respuesta)", s.r_geomean);
     println!("  r(magnitud)        = {:.3}  (la señal gratis que NO existe)", s.r_magnitud);
@@ -257,6 +260,32 @@ fn cmd_stake(args: &[String]) -> Result<(), String> {
     };
     println!("  VEREDICTO ({n_tramos} tramos): {voto}");
     Ok(())
+}
+
+/// 9. CONGELAR Y DESCONGELAR — el primer número que lo mata.
+///
+/// Mide, ventana a ventana, qué fracción de los parámetros se queda quieta
+/// VARIAS ventanas seguidas (no una sola vez -- eso pasa todo el tiempo por
+/// ruido y no dice nada). Si esa fracción es cero o no crece con el
+/// entrenamiento, no hay nada que congelar y el punto 9 se cierra sin escribir
+/// el mecanismo.
+fn cmd_settle(args: &[String]) -> Result<(), String> {
+    check_unknown(args, &["data", "dim", "ffn", "blocks", "seq", "epochs", "lr", "wd", "seed", "val", "every", "streak"])?;
+    let cfg = crate::settle::SettleConfig {
+        data_path: flag(args, "data").ok_or("settle requiere --data <archivo>")?,
+        dim: flag_num(args, "dim", 256)?,
+        ffn: flag_num(args, "ffn", 512)?,
+        blocks: flag_num(args, "blocks", 4)?,
+        seq_len: flag_num(args, "seq", 64)?,
+        epochs: flag_num(args, "epochs", 6)?,
+        lr: flag_num(args, "lr", 3e-4)?,
+        wd: flag_num(args, "wd", 0.01)?,
+        seed: flag_num(args, "seed", 7)? as u64,
+        val_frac: flag_num(args, "val", 0.1)?,
+        every: flag_num(args, "every", 100)?,
+        streak: flag_num(args, "streak", 3)?,
+    };
+    crate::settle::run(&cfg)
 }
 
 fn print_calibration(cal: &crate::bet::Calibration, titulo: &str, bins: usize) {

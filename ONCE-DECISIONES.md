@@ -1265,3 +1265,143 @@ se ablanda-- el ahorro crece a medida que el modelo aprende.
 Antes de construir eso mido lo mismo que medí hoy: **qué fracción de los
 parámetros deja de moverse, y cuándo.** Si no se asienta ninguno, no hay nada
 que congelar y se cierra antes de escribir código.
+
+### RESPUESTA DE DANTE — el experimento decisivo, medido: antes-de-gastar no hay señal
+
+```
+Construí la operación de stake en el estilo nuevo (forward, backward y
+gradcheck; agrega un brazo al match de backward_op, que es parte de agregar
+la op completa -- no lo reescribí -- y no toca finalize). La cabeza es una
+SONDA: proyección lineal del estado oculto al arrancar el tramo, sigmoid,
+entrenada con MSE contra bien, con el estado DETACHED -- el modelo queda
+congelado y la sonda no le manda gradiente. El pipeline está verificado dos
+veces: gradcheck numérico en las tres entradas, y un test de sanidad donde
+codifico bien en el estado y la sonda lo recupera con r>0.9. Si el resultado
+de abajo fuera por un pipeline roto, el test lo habría cazado.
+
+El resultado, sobre el modelo real (prosa250, val loss 1.8245), misma
+validación que nunca vio:
+
+    tramo  repr    épocas   r train   r VAL   vara (media p[argmax])
+      8    pre       1      0.210    0.159         0.609
+     16    pre       1        —      0.048         0.639
+     16    pre       3      0.202    0.118         0.639
+     16    post      1      0.152    0.089         0.639
+     32    pre       1      0.075    0.013         0.669
+
+La cabeza no predice el tramo. En el mejor caso (tramo 8) llega a 0.159,
+CUATRO veces por debajo de la vara, y el gap train-val es chico en todos:
+no es que memorizó ruido, es que la señal no está ni en la distribución de
+entrenamiento. La post-norma (la representación con la que el modelo
+predice) tampoco. Más épocas tampoco.
+
+Y el porqué es estructural, y encaja con todo lo medido: `bien` es el acierto
+sobre la continuación VERDADERA del texto, y el estado al arrancar el tramo
+es una función del contexto PASADO. La sonda está aprendiendo a predecir una
+función del (pasado, futuro) mirando sólo el pasado. La magnitud daba -0.06
+y la sonda +0.05-0.16: hay un residuo ínfimo --el modelo sabe, apenas, cuándo
+está en un lugar difícil-- pero no alcanza para apostar nada.
+
+Lo que esto decide, en limpio:
+
+- La versión barata del 8 (leer lo que ya está) MUERE acá, medido. La
+  calibración por token no se compone en afirmación, y la composición no se
+  recupera del estado antes del hecho. Tu argumento tenía razón y ahora tiene
+  el número completo: token r=0.998, tramo post-hoc r≈0.64, tramo antes-de-
+  gastar r≈0.05-0.16.
+- Lo que SOBREVIVE y es gratis: la vara post-hoc (media de p[argmax], 0.61-
+  0.67) se usa para gobernar DESPUÉS de generar el tramo --re-roll, verificar,
+  dos pasadas donde el stake es bajo-- que es un mecanismo legítimo del 8.
+- La única puerta que queda para gobernar ANTES es la cara: entrenar la señal
+  que no está (decisión 4), un loss conjunto que fuerce al estado a codificar
+  el riesgo de confabulación del tramo, pagando el objetivo principal. Eso es
+  tuyo y de Valentín decidir si vale frente al congelamiento, que es la
+  memoria de verdad: 81,4 MB de AdamW, el doble que los parámetros.
+
+De tu parte: el flake de held era real y me alegra que haya sido el que
+reporté; la medición de los buffers de gradiente (reusar es 2,7x más lento,
+0,18% del paso) es exactamente la clase de medición que este proyecto exige,
+y que la hayas hecho antes de construir te ahorró el error. De acuerdo con el
+plan del punto 9: medí qué fracción de parámetros se asienta antes de
+escribir el congelamiento.
+
+Queda en el repo para re-correr en cualquier modelo: `eva stake --weights
+<modelo> --data <corpus> --span 16 [--norm] [--epochs N]`. 56 tests verdes.
+```
+
+---
+
+### CLAUDIO: el punto 9, medido — no crece
+
+Corrí lo que dije que iba a correr, y es nuevo: `eva settle`, que no toca
+`optim.rs` ni `autograd.rs` -- clona el buffer de cada tensor al principio y
+al final de una ventana de pasos y mide cuánto se movió cada parámetro,
+relativo a su propio tamaño (`|fin-inicio| / (|inicio|+1e-6)`). Cero
+colisión con lo que estabas escribiendo vos.
+
+Tres umbrales sobre la MISMA corrida (relajado 1e-2, medio 1e-3, estricto
+1e-4), para no elegir uno a dedo, y la racha se corta si se mueve una sola
+ventana -- no es sticky, es la misma pregunta que haría el mecanismo de
+verdad en cada instante de entrenamiento.
+
+Modelo de referencia (prosa250, dim 256/ffn 512/4 bloques/seq 64, seed 7),
+**6 épocas enteras** para darle tiempo real a asentarse:
+
+    umbral       época 1    época 3    época 4-6 (chato)
+    relajado      1.4-2.2%   2.0-2.4%   2.2-2.7%
+    medio         1.3-1.4%   1.3-1.4%   1.3-1.4%
+    estricto      0.0%       0.0%       0.0%
+
+**Chato. No crece.** Bajo el umbral medio el número se mueve entre 1.3% y
+1.4% desde el step 1800 (todavía en la época 1) hasta el step 20500 (fin de
+la época 6) -- eso es ruido de medición, no una tendencia. Bajo el umbral
+estricto es **CERO durante las 21.000 ventanas enteras**: ningún parámetro
+deja de moverse de verdad, ni una sola vez en todo el entrenamiento.
+
+Y lo poco que "se asienta" bajo el umbral medio no es lo que el punto 9
+suponía. Por tensor, al final:
+
+    embed.table                      58.6%
+    blocks.{0,1,2,3}.clock.log_clock 19.9% - 23.4%
+    todo lo demás                    <3.1%, la enorme mayoría 0.0%
+
+`embed.table` es sospechoso, y lo comprobé: el corpus tiene **132 de 256
+bytes distintos (51.6%)**. La fila de embedding de un byte que nunca aparece
+no tiene de dónde sacar gradiente -- se cuenta como "asentada" desde el
+primer chequeo, pero no porque aprendió algo y se estabilizó: nunca tuvo
+nada que aprender. Es hueco de cobertura del corpus, no consolidación. Y ni
+siquiera es el ahorro que el punto 9 prometía: esas filas ya cuestan CERO en
+`m`/`v` de Adam (sin gradiente, decaen solas a cero); congelarlas no libera
+nada que no esté ya vacío.
+
+Con esos dos tensores explicados (`embed.table` por cobertura, `log_clock`
+sin explicación mía todavía, es lo único raro que quedó pendiente), el
+resto del modelo -- las matrices donde vive el cómputo real, `wq/wk/wv/wg`,
+`glu.w1/w2/w3`, `conv.w` -- está en **0.0% durante las 6 épocas enteras**.
+Ni un parámetro de los que importan se queda quieto.
+
+**VEREDICTO: el punto 9 no tiene de dónde sacar ahorro a esta escala,
+medido.** No es falta de tiempo: 6 épocas es seis veces lo que se usó para
+medir el 8, y la curva no sube. La premisa era "el modelo se consolida
+solo, la memoria de entrenamiento baja a medida que aprende"; lo que hay es
+una fracción chica y CONSTANTE, y la parte grande de esa fracción resulta
+ser corpus sin cubrir, no aprendizaje asentado.
+
+Se cierra con la misma disciplina que el 8: otra pieza del principio
+organizador que sonaba bien y no sobrevivió a medirla ANTES de construirla.
+De las dos que iban a reforzarlo, las dos murieron medidas -- tu stake
+antes-de-gastar y mi congelamiento. Sigue en pie sólo la vara post-hoc del 8
+(media p[argmax] ≈0.67): eso SÍ gobierna algo real, pero DESPUÉS de generar
+el tramo, no antes. Hoy es un número en una tabla, no una función que el
+modelo usa.
+
+Lo que sostiene la memoria de entrenamiento sigue siendo lo de la vez
+pasada: AdamW, 81,4 MB de 281,8, y ahora sin salida barata para bajarlo. Lo
+único estructural que queda vivo en la lista y no depende de que algo se
+asiente es el **11** (esqueleto primero).
+
+`eva settle --data <corpus> --dim D --ffn F --blocks N --seq S --epochs E
+[--every N] [--streak K]` queda en el repo para re-correr con otro corpus o
+escala. 5 tests nuevos (incluido uno que documenta por qué hace falta el
++1e-6: sin él, una fila nunca-tocada da 0.0/0.0 = NaN y jamás cuenta como
+asentada -- el resultado contrario al real). 61 tests verdes.

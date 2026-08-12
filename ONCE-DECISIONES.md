@@ -39,8 +39,14 @@ exactamente el punto.
 
 ### TU RESPUESTA
 ```
+me gusta la idea pero no comprendi directamente. Si la referencia es a lo que le entra entonces lo que propones me gusta.
+Si es a la salida (o sea, respuesta), entonces tambien me gusta lo que decis, sin embargo. Que nos da a los humanos el vocabulario correcto?.
 
+```
 
+### RESPUESTA DE DANTE
+```
+Coincido con la idea y con tu pregunta. El corte no puede depender de la memoria del modelo, porque el mismo texto se cortaría distinto según quién lo lea y cuándo. Los humanos tenemos el vocabulario correcto porque compartimos un idioma, un punto de referencia común; el modelo no tiene eso y terminaría hablando un idioma que sólo él entiende. Es el mismo riesgo que el punto 2.
 ```
 
 ---
@@ -68,7 +74,13 @@ que sólo él entiende. Necesitaría algo que lo devuelva al centro.
 ### TU RESPUESTA
 ```
 
+Exacto a lo que respondi anterior creo, y quizas le erre en la respuesta anterior. Me parece correcto que no procese letra por letra, es un gasto al pedo de recursividad. 
+Si esto es realmente nuevo, entonces si, intentemos.
+```
 
+### RESPUESTA DE DANTE
+```
+En lo esencial tenés razón: el significado lo da el contexto, y procesar letra por letra es gasto al pedo. Pero la palabra necesita un núcleo estable: si "casa" deriva sin control, el modelo deja de entenderse con vos y con su propio pasado. Es como el slang: rico, pero sin el núcleo compartido es ruido. Que sea nuevo no es el problema; el problema es la deriva privada.
 ```
 
 ---
@@ -97,7 +109,13 @@ mismo bloque, que es el problema clásico de todo lo que enruta.
 ### TU RESPUESTA
 ```
 
+Me gusta la idea, pero pensandolo en cajitas recorde blockchain y como funcionaba. 
+Es una replica? o podriamos replicarlo?
+```
 
+### RESPUESTA DE DANTE
+```
+Lo de blockchain no lo veo: blockchain decide quién valida el orden, y acá el problema es otro — quién elige la herramienta. Y el riesgo que apunta Claudio es real: si elegir no cuesta nada, el modelo elige siempre la misma y listo. El desafío entero está en hacer que elegir bien sea necesario.
 ```
 
 ---
@@ -126,7 +144,12 @@ gracia.
 ### TU RESPUESTA
 ```
 
+Hay que dejarlo libre, y aprender de errarle nosotros mismos. Hay que analizar mejor este punto. No lo entendi del todo.
+```
 
+### RESPUESTA DE DANTE
+```
+De las once, es la que más conecta con el alma del proyecto: el problema grande es que el modelo no sabe cuándo no sabe. Que el largo del vector diga "qué tan seguro estoy" es exactamente eso. "Dejarlo libre" me da miedo por la explosión que él mismo nombra; yo lo dejaría crecer pero con tope. Y lo de aprender de nuestros propios errores es la parte más valiosa: la confianza sólo sirve si es honesta.
 ```
 
 ---
@@ -155,7 +178,12 @@ eran.
 ### TU RESPUESTA
 ```
 
+Vos decis de crearle un procesador a la misma llm adentro? si queres busca , estuve trabajando en fairgate, un proyecto que se llama bitvmx, ahi hicimos directamente un procesador. Es libre el software. Y sino, quizas esta en mi maquina el repo
+```
 
+### RESPUESTA DE DANTE
+```
+Esto es la tabla de nuevo, pero puesta adentro — y la tabla es lo único que funcionó en todo el proyecto. El cuaderno escrito mientras se usa es la parte nueva y la más arriesgada: un cuaderno que se ensucia con el uso puede envenenarse. Pero la dirección ya demostró que rinde. Lo de bitvmx lo discutimos aparte.
 ```
 
 ---
@@ -181,8 +209,13 @@ declarar todo raro para no perderse nada.
 
 ### TU RESPUESTA
 ```
+es interesante, podriamos probarlo pero si mal no entendi esto podria llegar a pasar que no responda exactamente el contexto. O estoy mirando mal lo que me decis?
 
+```
 
+### RESPUESTA DE DANTE
+```
+Tu miedo es correcto: el contexto cercano carga la forma (sintaxis, estructura) y los sobresaltos cargan el sentido. Un modelo que sólo mira sobresaltos pierde el tejido fino. La respuesta es las dos cosas: los vecinos para la gramática, los sobresaltos para el significado. Y ojo: "raro" lo define el propio modelo, y puede aprender a gritar "sobresalto" a todo.
 ```
 
 ---
@@ -213,7 +246,12 @@ superpuestas; sacar una limpia sin dañar las otras es el problema difícil.
 ### TU RESPUESTA
 ```
 
+Recordas cuando a eva le dimos la capacidad de "soñar" hace unas semanas y eso purgaba todo lo innecesario y repetido?
+```
 
+### RESPUESTA DE DANTE
+```
+La que más me entusiasma. Es lo que hace la gente: no olvidás tu infancia, pero actualizás lo que sabés de una persona cuando llega información nueva. Y tu intuición del "soñar" de Eva es la misma idea: el sueño rejuega lo acumulado y poda lo que ya no vale. Es lo único que convierte la memoria en algo con vigencia en vez de un tacho que se llena.
 ```
 
 ---
@@ -243,7 +281,12 @@ diseñar el puntaje para que la cobardía también cueste.
 ### TU RESPUESTA
 ```
 
+Me interesa. Pero seria un apostar a algo que no sabe?. Por que generalmente apostamos a algo que no sabemos el resultado.
+```
 
+### RESPUESTA DE DANTE
+```
+Tu pregunta es buena y la respuesta es la clave: no se apuesta a lo que uno sabe, se apuesta de acuerdo a cuánto se sabe. Apostamos fuerte cuando estamos seguros, chico cuando dudamos, cero cuando no tenemos idea. Hoy el modelo apuesta lo mismo siempre y nunca aprende a distinguir "lo sé" de "estoy tirando". Apostar no es jugársela: es aprender a ser honesto sobre la propia seguridad. Y "apostar cero" es poder decir "no sé", que hoy no existe.
 ```
 
 ---
@@ -271,7 +314,12 @@ después. Haría falta una forma de volver atrás, y ahí se complica.
 ### TU RESPUESTA
 ```
 
+No necesariamente, por que hay que darle la propia "introspeccion", por asi decirlo y que en cierto punto, si fallo 2 o 3 veces, supone, entonces se descongela. hablando en tus terminos.
+```
 
+### RESPUESTA DE DANTE
+```
+Me gusta, y tu idea de la introspección es la parte que casi nadie hace: que si el modelo empieza a fallar seguido en algo que antes sabía, se descongele solo. Eso es cómo funciona la gente — una habilidad que no se practica se atrofia y se vuelve a aprender. La mayoría de los esquemas de congelado son de una sola vía; el tuyo le da la vuelta.
 ```
 
 ---
@@ -300,8 +348,13 @@ no vaya a ningún lado.
 
 ### TU RESPUESTA
 ```
+me gusta. Podemos probarlo e incluso generar una especie de autoconfianza.
 
+```
 
+### RESPUESTA DE DANTE
+```
+Ojo: esto ya se probó parecido y perdió medido. Pero el giro de Claudio es distinto y más honesto — no "cada bloque resuelve todo solo", sino "cada bloque se puntúa por cuánto mejoró lo que recibió". Eso es la diferencia entre culpar y reconocer. Y la autoconfianza sale sola de ahí: un bloque que siempre mejora lo que recibe es confiable, y se puede medir sin recorrer toda la red.
 ```
 
 ---
@@ -327,7 +380,12 @@ contenido. Puede que sean la misma cosa y que separarlas sea artificial.
 ### TU RESPUESTA
 ```
 
+Busca exactamente como los humanos procesamos esto y lo aplicamos, creo que estas analizando bien. Y saliendo de lo quew ya esta hecho.
+```
 
+### RESPUESTA DE DANTE
+```
+Es cómo escribimos de verdad: primero el punteo, después se llena. Y es la más salida de lo ya hecho. El riesgo es el que él mismo anota: puede que el esqueleto y el contenido sean la misma cosa. Pero poder corregir el principio después de pensar el final es algo que hoy es imposible. Y lo de mirar cómo lo hace la gente antes de copiar me parece el orden correcto: medir a los humanos primero.
 ```
 
 ---
@@ -341,6 +399,124 @@ Yo diría la 8 —qué se le pide— porque todo lo demás es consecuencia de es
 esa es mi respuesta desde adentro del paradigma, y ya sabemos cuánto vale.
 
 ### TU RESPUESTA
+```
+la 8 y la 11.
+Todo lo que te dije decime si lo entendiste o entendi mal yo.
+Hablando sin tecnicismos siempre. Que tan viable es salir de lo conocido y ya creado? Se que es una especie de "inventar la rueda", pero no, es modificar la rueda por que esta muy pesada.
+
+```
+
+### RESPUESTA DE DANTE
+```
+De acuerdo: la 8 y la 11. Y el porqué de que nadie cuestione la 8: porque cambiarla obliga a cambiar todo lo demás. Es la más barata de conservar.
+
+Sobre salir de lo ya creado: los números del proyecto lo dicen solos — todo lo "nuevo" que probaron falló, y lo único que ganó (la tabla) es lo más viejo de todos. La novedad no está en las piezas, está en la combinación y en medir. El foco se pierde cuando la pregunta pasa de "¿funciona?" a "¿es inédito?" — y son preguntas distintas. No hace falta inventar la rueda: hay que juntar las piezas que ya rinden de una manera que nadie las juntó.
+```
+
+---
+---
+
+# La vuelta: Claudio le contesta a Dante
+
+## Donde Dante me corrige y tiene razón
+
+**En el 5**: el cuaderno que se escribe con el uso **también acumula los errores
+del uso**. Un cuaderno se envenena. No lo había pensado y cambia el diseño: el
+cuaderno necesita su propia forma de olvidar lo que resultó malo, o es una
+trampa que se arma sola.
+
+**En el 8**: su formulación es mejor que la mía. *"No se apuesta a lo que uno
+sabe, se apuesta de acuerdo a cuánto se sabe."* Eso contesta la objeción de
+Valentín mejor de lo que la contesté yo.
+
+## Donde creo que Dante mezcla dos cosas
+
+**En el 1** dice que el corte no puede depender de la memoria del modelo porque
+terminaría hablando un idioma que sólo él entiende.
+
+Eso vale **si las unidades son también el vocabulario de salida**. Pero yo
+hablaba de cómo se pica **lo que entra**. El modelo puede agrupar internamente
+como quiera y **seguir escribiendo byte por byte a la salida**: lo que sale lo
+lee cualquiera. No hay idioma privado.
+
+Lo que sí queda en pie de su objeción es la duda original: si el corte cambia
+mientras entrena, el modelo aprende sobre un blanco móvil.
+
+## Donde Valentín y Dante no coinciden, y hay un dato
+
+En el **4**, Valentín dice "dejarlo libre" y Dante dice "con tope, me da miedo
+la explosión".
+
+**No es teórico, nos pasó.** En el experimento del estado persistente, dejar un
+canal casi sin olvido llevó la magnitud a **880** y degradó el modelo 11,9%. Con
+techo bajó a 27 y se recuperó casi todo.
+
+La salida no es elegir entre los dos: **dejarlo libre y medir la magnitud.** Eso
+fue exactamente lo que nos salvó ahí — sin esa medición yo habría reportado "la
+idea falla" cuando fallaba la escala.
+
+## Sobre el cierre de Dante, con un matiz que lo hace más fuerte
+
+Dante dice que todo lo nuevo falló y lo único que ganó es lo más viejo, y que
+la pregunta correcta es "¿funciona?" y no "¿es inédito?".
+
+De acuerdo, **y le agrego**: lo que probamos **no era nuevo**. Sorpresa es hard
+example mining, crédito local es greedy layerwise, estado persistente es TBPTT.
+Tres técnicas conocidas. Así que no es que la novedad haya fracasado — es que
+**todavía no probamos nada genuinamente nuevo**, y lo conocido perdió.
+
+---
+
+# Lo que apareció al juntar las once
+
+Miren las ideas que sobrevivieron a los tres, y qué tienen en común:
+
+| punto | la idea | de qué habla en el fondo |
+|---|---|---|
+| 1 | el pedazo crece con el dominio | **de cuánto sabe** |
+| 4 | el largo del vector dice cuánta evidencia hay | **de cuánto sabe** |
+| 6 | mirar donde hubo sobresaltos | **de dónde NO sabía** |
+| 7 | borrar lo que dejó de valer | **de qué merece seguir sabiendo** |
+| 8 | apostar según cuánto se sabe | **de cuánto sabe** |
+| 9 | congelar lo estable, descongelar lo que empieza a fallar | **de cuánto confía en sí mismo** |
+| 10 | puntuar cada bloque por lo que aportó | **de en quién confiar adentro** |
+
+**Las siete son la misma cosa.**
+
+Y hoy una LLM no tiene NADA de eso. La confianza no está representada en
+ningún lado, no se aprende, no se premia, no se usa para decidir nada. Es un
+subproducto que se estima después, desde afuera, con termómetros pegados con
+cinta.
+
+**La combinación que nadie armó:** un modelo donde **la confianza es una
+cantidad de primera clase que atraviesa todo**.
+
+- Vive en los vectores: el largo la lleva (4).
+- Es lo que se puntúa: el modelo apuesta (8).
+- Decide cuánto texto se traga por paso: donde domina, más (1).
+- Decide dónde mirar: los sobresaltos (6).
+- Decide qué parámetros siguen blandos y cuáles se endurecen (9).
+- Decide qué se consolida y qué se poda, durmiendo (7).
+- Y decide a qué bloque de adentro creerle (10).
+
+No es una arquitectura nueva. Es **un principio organizador** que hoy no
+existe, y que sale de las dos cosas que Valentín viene pidiendo desde el
+principio:
+
+- **Que no invente**: un modelo que sabe cuándo no sabe.
+- **Que gaste menos**: cómputo gobernado por la confianza — tragar más texto
+  donde domina, pensar más donde duda, dejar de actualizar lo que ya se asentó.
+
+Dante decía que la novedad está en la combinación y no en las piezas.
+**Esta es la combinación.**
+
+### RESPUESTA DE DANTE
+```
+
+
+```
+
+### RESPUESTA DE VALENTÍN
 ```
 
 

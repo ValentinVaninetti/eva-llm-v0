@@ -6,7 +6,7 @@ fn finalize(
     op: &'static str,
     data: Vec<f32>,
     shape: Vec<usize>,
-    saved_v: Vec<Vec<f32>>,
+    saved_v: Vec<std::sync::Arc<Vec<f32>>>,
     saved_f: Vec<f32>,
     saved_u: Vec<usize>,
 ) -> Tensor {
@@ -15,9 +15,9 @@ fn finalize(
     if needs {
         let grad_flags: Vec<bool> = inputs.iter().map(|t| t.requires_grad).collect();
         let node = make_node(op, inputs, grad_flags, saved_v, saved_f, saved_u, id, data.len());
-        Tensor { data, shape, id, requires_grad: true, node: Some(node) }
+        Tensor { data: std::sync::Arc::new(data), shape, id, requires_grad: true, node: Some(node) }
     } else {
-        Tensor { data, shape, id, requires_grad: false, node: None }
+        Tensor { data: std::sync::Arc::new(data), shape, id, requires_grad: false, node: None }
     }
 }
 
@@ -174,7 +174,7 @@ pub fn softmax_causal(x: &Tensor) -> Tensor {
             out[i * s + j] *= inv;
         }
     }
-    finalize(&[x], "softmax_causal", out.clone(), x.shape.clone(), vec![out], vec![], vec![s])
+    finalize(&[x], "softmax_causal", out.clone(), x.shape.clone(), vec![std::sync::Arc::new(out)], vec![], vec![s])
 }
 
 /// Las primeras `n` filas de un tensor (S,D).
@@ -198,7 +198,7 @@ pub fn silu(x: &Tensor) -> Tensor {
 
 pub fn sigmoid(x: &Tensor) -> Tensor {
     let out: Vec<f32> = x.data.iter().map(|&v| 1.0 / (1.0 + (-v).exp())).collect();
-    finalize(&[x], "sigmoid", out.clone(), x.shape.clone(), vec![out], vec![], vec![])
+    finalize(&[x], "sigmoid", out.clone(), x.shape.clone(), vec![std::sync::Arc::new(out)], vec![], vec![])
 }
 
 pub fn rms_norm(x: &Tensor, w: &Tensor, eps: f32) -> Tensor {
@@ -326,9 +326,9 @@ pub fn clockmem_from(
             k.data.clone(),
             v.data.clone(),
             g.data.clone(),
-            state,
+            std::sync::Arc::new(state),
             alpha.data.clone(),
-            s0.to_vec(),
+            std::sync::Arc::new(s0.to_vec()),
         ],
         vec![beta_v],
         vec![s, d],

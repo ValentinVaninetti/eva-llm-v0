@@ -16,7 +16,7 @@ pub fn next_id() -> usize {
 
 #[derive(Clone)]
 pub struct Tensor {
-    pub data: Vec<f32>,
+    pub data: std::sync::Arc<Vec<f32>>,
     pub shape: Vec<usize>,
     pub id: usize,
     pub requires_grad: bool,
@@ -25,7 +25,7 @@ pub struct Tensor {
 
 impl Tensor {
     pub fn new(data: Vec<f32>, shape: Vec<usize>) -> Self {
-        Tensor { data, shape, id: next_id(), requires_grad: false, node: None }
+        Tensor { data: std::sync::Arc::new(data), shape, id: next_id(), requires_grad: false, node: None }
     }
 
     pub fn numel(&self) -> usize {

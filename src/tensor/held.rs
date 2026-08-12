@@ -65,6 +65,17 @@ pub fn nodos_pico() -> usize {
 }
 
 /// Informe: cuánto sostiene el grafo y quién lo sostiene.
+static GRADS_PICO: AtomicUsize = AtomicUsize::new(0);
+
+/// Cuánto ocupa el mapa de gradientes en su punto más alto.
+///
+/// `backward` crea un `Vec` nuevo por CADA tensor que recibe gradiente --no
+/// sólo por parámetro, también por cada activación intermedia-- y lo tira al
+/// terminar el paso. Si esto es grande, el cuello no es el grafo sino el mapa.
+pub fn grads(bytes: usize) {
+    GRADS_PICO.fetch_max(bytes, Relaxed);
+}
+
 pub fn informe(params: usize) {
     let mut t = POR_OP.lock().unwrap().clone();
     t.sort_by_key(|(_, b, _)| std::cmp::Reverse(*b));
@@ -80,6 +91,8 @@ pub fn informe(params: usize) {
     println!("  GRAFO, pico vivo      {:8.1} MB   <- lo que se puede atacar", pico_mb());
     println!("  nodos vivos, pico     {:8}", nodos_pico());
     println!("  grafo vivo ahora      {:8.1} MB   (0 si se liberó todo)", vivos_mb());
+    println!("  MAPA DE GRADIENTES    {:8.1} MB   <- un Vec nuevo por tensor, cada paso",
+        GRADS_PICO.load(Relaxed) as f64 / 1_048_576.0);
 
     println!("\n── quién guarda, acumulado sobre todo el entrenamiento ──");
     for (op, b, c) in t.iter().take(8) {

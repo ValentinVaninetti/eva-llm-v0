@@ -6,12 +6,15 @@ use crate::tensor::Tensor;
 fn numeric(t: &mut Tensor, f: impl Fn(&Tensor) -> f32, eps: f32) -> Vec<f32> {
     let mut out = vec![0.0; t.data.len()];
     for i in 0..t.data.len() {
+        // `make_mut` porque el buffer ahora se comparte con el grafo. Acá sí
+        // puede copiar la primera vez, y está bien: es el gradcheck, no el
+        // camino caliente.
         let orig = t.data[i];
-        t.data[i] = orig + eps;
+        std::sync::Arc::make_mut(&mut t.data)[i] = orig + eps;
         let fp = f(t);
-        t.data[i] = orig - eps;
+        std::sync::Arc::make_mut(&mut t.data)[i] = orig - eps;
         let fm = f(t);
-        t.data[i] = orig;
+        std::sync::Arc::make_mut(&mut t.data)[i] = orig;
         out[i] = (fp - fm) / (2.0 * eps);
     }
     out

@@ -119,6 +119,18 @@ impl EvaModel {
     }
 
     pub fn forward(&self, ids: &[usize]) -> Tensor {
+        let (logits, _) = self.forward_hidden(ids);
+        logits
+    }
+
+    /// Igual que `forward`, pero además devuelve el estado oculto ANTES de la
+    /// RMSNorm de salida.
+    ///
+    /// La magnitud de ese vector es la señal del 4 (el largo como confianza).
+    /// Se mide pre-norma a propósito: la RMSNorm aplana el largo por
+    /// construcción (el punto entero de la decisión 4 es que esa información
+    /// se tira), así que medirla post-norma sería medir ruido.
+    pub fn forward_hidden(&self, ids: &[usize]) -> (Tensor, Tensor) {
         let mut x = self.embed.embed(ids);
         if let Some(pos) = &self.pos {
             // En generación la ventana crece de a un token, así que el corte
@@ -129,8 +141,10 @@ impl EvaModel {
         for b in &self.blocks {
             x = b.forward(&x);
         }
+        let hidden = x.clone();
         let x = self.norm_out.forward(&x);
-        ops::matmul(&x, &self.head_w)
+        let logits = ops::matmul(&x, &self.head_w);
+        (logits, hidden)
     }
 
     /// Pasada llevando el estado de ClockMem de una ventana a la siguiente.

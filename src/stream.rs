@@ -257,12 +257,12 @@ fn rms_norm(x: &[f32], n: &RMSNorm) -> Vec<f32> {
     let d = x.len();
     let sq: f32 = x.iter().map(|v| v * v).sum();
     let inv = 1.0 / (sq / d as f32 + n.eps).sqrt();
-    x.iter().zip(&n.w.data).map(|(v, w)| v * inv * w).collect()
+    x.iter().zip(n.w.data.iter()).map(|(v, w)| v * inv * w).collect()
 }
 
 fn linear(x: &[f32], l: &Linear, out_d: usize) -> Vec<f32> {
     let mut y = matvec(x, &l.w.data, x.len(), out_d);
-    for (yi, bi) in y.iter_mut().zip(&l.b.data) {
+    for (yi, bi) in y.iter_mut().zip(l.b.data.iter()) {
         *yi += bi;
     }
     y

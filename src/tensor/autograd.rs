@@ -10,9 +10,19 @@ pub struct Input {
 }
 
 impl Node {
-    /// Bytes que este nodo sostiene vivos.
-    fn peso(&self) -> usize {
-        self.saved_v.iter().map(|v| v.len() * 4).sum::<usize>()
+    /// Bytes que este nodo sostiene **de verdad**.
+    ///
+    /// Un buffer compartido no cuenta: si alguien más lo tiene vivo --y para
+    /// los pesos ese alguien es el modelo-- guardarlo acá no reserva un byte.
+    /// Contar por largo, como hacía la primera versión de este medidor, daba
+    /// exactamente el mismo número antes y después de dejar de clonar. El
+    /// instrumento no veía el cambio que estaba hecho para medir.
+    fn peso_propio(&self) -> usize {
+        self.saved_v
+            .iter()
+            .filter(|v| std::sync::Arc::strong_count(v) == 1)
+            .map(|v| v.len() * 4)
+            .sum::<usize>()
             + self.saved_f.len() * 4
             + self.saved_u.len() * std::mem::size_of::<usize>()
     }
@@ -20,7 +30,10 @@ impl Node {
 
 impl Drop for Node {
     fn drop(&mut self) {
-        crate::tensor::held::sale(self.peso());
+        // El peso se calculó al crear y viaja con el nodo: recalcularlo acá
+        // daría distinto si alguien clonó el Arc mientras tanto, y el contador
+        // quedaría descompensado.
+        crate::tensor::held::sale(self.peso_guardado);
     }
 }
 
@@ -28,18 +41,27 @@ pub struct Node {
     pub op: &'static str,
     pub inputs: Vec<Input>,
     pub grad_flags: Vec<bool>,
-    pub saved_v: Vec<Vec<f32>>,
+    /// Lo que el backward necesita de la pasada hacia adelante.
+    ///
+    /// `Arc` y no `Vec`: guardar la entrada de una operación era **copiar el
+    /// buffer**. Para `x @ W` eso significaba clonar la matriz de pesos, que ya
+    /// está viva en el modelo. Medido: el 83% de lo que guardaba `matmul` eran
+    /// pesos duplicados, y `matmul` es el 65% del grafo. Ahora guardar es subir
+    /// un contador.
+    pub saved_v: Vec<std::sync::Arc<Vec<f32>>>,
     pub saved_f: Vec<f32>,
     pub saved_u: Vec<usize>,
     pub out_id: usize,
     pub out_len: usize,
+    /// Lo que este nodo reserva de verdad, fijado al crearlo.
+    peso_guardado: usize,
 }
 
 pub fn make_node(
     op: &'static str,
     inputs: &[&Tensor],
     grad_flags: Vec<bool>,
-    saved_v: Vec<Vec<f32>>,
+    saved_v: Vec<std::sync::Arc<Vec<f32>>>,
     saved_f: Vec<f32>,
     saved_u: Vec<usize>,
     out_id: usize,
@@ -49,8 +71,12 @@ pub fn make_node(
         .iter()
         .map(|t| Input { id: t.id, len: t.numel(), node: t.node.clone() })
         .collect();
-    let n = Node { op, inputs, grad_flags, saved_v, saved_f, saved_u, out_id, out_len };
-    crate::tensor::held::entra(op, n.peso());
+    let mut n = Node {
+        op, inputs, grad_flags, saved_v, saved_f, saved_u, out_id, out_len,
+        peso_guardado: 0,
+    };
+    n.peso_guardado = n.peso_propio();
+    crate::tensor::held::entra(op, n.peso_guardado);
     Arc::new(n)
 }
 
@@ -80,6 +106,8 @@ pub fn backward(out: &Tensor) -> HashMap<usize, Vec<f32>> {
         }
     }
 
+    let bytes: usize = grads.values().map(|v| v.len() * 4).sum();
+    crate::tensor::held::grads(bytes);
     grads
 }
 

@@ -238,25 +238,137 @@ pub fn classify_row(row: &[f32], target: usize) -> (f32, f32, bool, f32) {
     (top1 / sum, (top1 - top2) / sum, argmax == target, p_target / sum)
 }
 
+/// Una observación por posición de texto.
+pub struct TokenObs {
+    pub conf: f32,
+    pub margin: f32,
+    pub correct: bool,
+    pub p_target: f32,
+    /// Largo (norma L2) del estado oculto pre-norma en esa posición.
+    pub hidden_norm: f32,
+}
+
 /// Mide la calibración del modelo sobre las ventanas `ds[from..to]`.
 pub fn measure(model: &EvaModel, ds: &TextDataset, from: usize, to: usize, n_bins: usize) -> Calibration {
     let mut cal = Calibration::new(n_bins);
+    for o in scan(model, ds, from, to) {
+        cal.add(o.conf, o.margin, o.correct, o.p_target);
+    }
+    cal
+}
+
+/// Una pasada sobre `ds[from..to]`, una observación por posición.
+///
+/// Es la pasada única: la calibración por token y el análisis por tramo se
+/// agregan sobre lo que esto devuelve, para que no sean dos implementaciones
+/// del mismo softmax.
+pub fn scan(model: &EvaModel, ds: &TextDataset, from: usize, to: usize) -> Vec<TokenObs> {
+    let mut out = Vec::new();
     let vocab = model.cfg.vocab;
+    let dim = model.cfg.dim;
     for wi in from..to {
         let (input, target) = ds.window(wi);
-        let logits = model.forward(&input);
+        let (logits, hidden) = model.forward_hidden(&input);
         for t in 0..input.len() {
             let row = &logits.data[t * vocab..(t + 1) * vocab];
             let (conf, margin, correct, pt) = classify_row(row, target[t]);
-            cal.add(conf, margin, correct, pt);
+            let h = &hidden.data[t * dim..(t + 1) * dim];
+            let norm = h.iter().map(|v| (v * v) as f64).sum::<f64>().sqrt() as f32;
+            out.push(TokenObs { conf, margin, correct, p_target: pt, hidden_norm: norm });
         }
     }
-    cal
+    out
+}
+
+/// Resultado del análisis por tramo para un largo de tramo.
+pub struct SpanAnalysis {
+    pub span_len: usize,
+    pub n: usize,
+    pub bien_global: f32,
+    /// Correlación de cada predictor con `bien`, sobre los tramos.
+    pub r_media: f32,
+    pub r_min: f32,
+    pub r_geomean: f32,
+    pub r_magnitud: f32,
+}
+
+/// Correlación entre los tramos.
+fn span_r(xs: &[f64], ys: &[f64]) -> f32 {
+    pearson(xs, ys)
+}
+
+/// Parten las observaciones en tramos de `span_len` dentro de cada ventana de
+/// `seq` y mide si el acierto del tramo (`bien`) se predice con:
+///
+/// * `media` — promedio de p[argmax] (la agregación más simple)
+/// * `min` — el eslabón más débil del tramo
+/// * `geomean` — media geométrica de p[verdad]: la "probabilidad del tramo"
+///   real que le da el modelo a lo que escribió
+/// * `magnitud` — largo del vector oculto AL ARRANCAR el tramo (la señal del
+///   4, disponible antes de que el tramo exista)
+///
+/// Si ninguno rastrea `bien` sobre texto que no vio, una cabeza de stake
+/// entrenada tampoco lo va a hacer: la apuesta se cierra acá.
+pub fn span_analysis(obs: &[TokenObs], seq: usize, span_len: usize) -> SpanAnalysis {
+    let mut xs_media = Vec::new();
+    let mut xs_min = Vec::new();
+    let mut xs_geomean = Vec::new();
+    let mut xs_mag = Vec::new();
+    let mut ys = Vec::new();
+    let mut n = 0usize;
+    let mut hits = 0usize;
+
+    // Los tramos no cruzan ventanas: cada ventana tiene sus posiciones y el
+    // contexto no se mezcla entre una y la siguiente.
+    let mut i = 0;
+    while i < obs.len() {
+        let hasta = (i / seq + 1) * seq;
+        let mut t = i;
+        while t + span_len <= hasta {
+            let mut media = 0.0f64;
+            let mut min = f64::INFINITY;
+            let mut loggeo = 0.0f64;
+            let mut ok = 0usize;
+            for o in &obs[t..t + span_len] {
+                media += o.conf as f64;
+                min = min.min(o.conf as f64);
+                loggeo += (o.p_target as f64).max(1e-9).ln();
+                ok += o.correct as usize;
+            }
+            let m = media / span_len as f64;
+            let geo = (loggeo / span_len as f64).exp();
+            let mag = obs[t].hidden_norm as f64;
+            let bien = ok as f64 / span_len as f64;
+            xs_media.push(m);
+            xs_min.push(min);
+            xs_geomean.push(geo);
+            xs_mag.push(mag);
+            ys.push(bien);
+            n += 1;
+            hits += ok;
+            t += span_len;
+        }
+        i = hasta;
+    }
+
+    SpanAnalysis {
+        span_len,
+        n,
+        bien_global: hits as f32 / (n * span_len).max(1) as f32,
+        r_media: span_r(&xs_media, &ys),
+        r_min: span_r(&xs_min, &ys),
+        r_geomean: span_r(&xs_geomean, &ys),
+        r_magnitud: span_r(&xs_mag, &ys),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mk_obs(conf: f32, p_target: f32, correct: bool, hidden_norm: f32) -> TokenObs {
+        TokenObs { conf, margin: 0.0, correct, p_target, hidden_norm }
+    }
 
     #[test]
     fn classify_row_conocido() {
@@ -366,5 +478,38 @@ mod tests {
         let (top, bottom) = c.top_vs_bottom().unwrap();
         assert_eq!(top, 1.0, "el bin más seguro es el de conf 0.9");
         assert_eq!(bottom, 0.0);
+    }
+
+    #[test]
+    fn tramos_no_cruzan_ventanas_y_los_predictores_rastrean() {
+        // seq 6 → dos ventanas de 6 posiciones; span_len 3 → 4 tramos, y
+        // ninguno puede cruzar de una ventana a la otra.
+        let plan = [(0.0, 0.01), (1.0 / 3.0, 1.0 / 3.0), (2.0 / 3.0, 2.0 / 3.0), (1.0, 0.99)];
+        let mut obs = Vec::new();
+        for &(bien, pt) in &plan {
+            for k in 0..3 {
+                let correct = (k as f32) < bien * 3.0;
+                obs.push(mk_obs(pt, pt, correct, bien + 0.5));
+            }
+        }
+        let a = span_analysis(&obs, 6, 3);
+        assert_eq!(a.n, 4);
+        assert!((a.bien_global - 0.5).abs() < 0.01, "bien global {}", a.bien_global);
+        assert!(a.r_geomean > 0.99, "r_geomean {}", a.r_geomean);
+        assert!(a.r_magnitud > 0.99, "r_magnitud {}", a.r_magnitud);
+        assert!(a.r_media > 0.99, "r_media {}", a.r_media);
+    }
+
+    #[test]
+    fn geomean_con_p_cero_sigue_siendo_finito() {
+        // p[verdad] = 0 en un tramo: la media geométrica tiene que quedar
+        // finita (piso), no explotar a infinito.
+        let mut obs = Vec::new();
+        for _ in 0..2 {
+            obs.push(mk_obs(0.5, 0.0, true, 1.0));
+            obs.push(mk_obs(0.5, 0.5, true, 1.0));
+        }
+        let a = span_analysis(&obs, 4, 2);
+        assert!(a.r_geomean.is_finite(), "r_geomean {}", a.r_geomean);
     }
 }

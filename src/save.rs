@@ -33,7 +33,7 @@ pub fn save_model(path: &str, model: &EvaModel) -> std::io::Result<()> {
         for &d in &t.shape {
             push_u32(&mut buf, d as u32);
         }
-        for &x in &t.data {
+        for &x in t.data.iter() {
             buf.extend_from_slice(&x.to_le_bytes());
         }
     }
@@ -95,7 +95,7 @@ pub fn load_model(path: &str) -> std::io::Result<EvaModel> {
     for (name, t) in model.named_parameters_mut() {
         if let Some(w) = weights.remove(&name) {
             debug_assert_eq!(w.len(), t.data.len(), "shape mismatch en {}", name);
-            t.data = w;
+            t.data = std::sync::Arc::new(w);
         }
     }
     Ok(model)

@@ -185,8 +185,22 @@ fn cmd_bet(args: &[String]) -> Result<(), String> {
         let t = crate::bet::measure(&model, &ds, 0, n_train, bins);
         print_calibration(&t, "ENTRENAMIENTO (texto que el modelo SÍ vio)", bins);
     }
-    let exam = crate::bet::measure(&model, &ds, n_train, n, bins);
-    print_calibration(&exam, "VALIDACIÓN (texto que el modelo NO vio)", bins);
+    let obs = crate::bet::scan(&model, &ds, n_train, n);
+    let mut cal = crate::bet::Calibration::new(bins);
+    for o in &obs {
+        cal.add(o.conf, o.margin, o.correct, o.p_target);
+    }
+    print_calibration(&cal, "VALIDACIÓN (texto que el modelo NO vio)", bins);
+
+    println!("\n=== TRAMOS (¿la confianza del tramo se predice con lo que ya hay?) ===");
+    println!("  bien = fracción de posiciones acertadas dentro del tramo");
+    println!("  r(media)   = promedio de p[argmax]      |  r(min) = eslabón débil");
+    println!("  r(geomean) = p[verdad] del tramo        |  r(magnitud) = largo del vector AL ARRANCAR");
+    for &l in &[8usize, 16, 32] {
+        let s = crate::bet::span_analysis(&obs, model.cfg.seq_len, l);
+        println!("  tramo {l:>2}: n={:>5}  bien {:.1}%  | r(media) {:.3}  r(min) {:.3}  r(geomean) {:.3}  r(magnitud) {:.3}",
+            s.n, 100.0 * s.bien_global, s.r_media, s.r_min, s.r_geomean, s.r_magnitud);
+    }
     Ok(())
 }
 

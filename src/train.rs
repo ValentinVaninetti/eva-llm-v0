@@ -115,16 +115,28 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
                 bwd += 1;
                 paso_local(&mut model, h, &mut opt, &input, &target)
             } else {
-                let logits = if tcfg.persist {
-                    model.forward_carrying(&input, &mut estados)
-                } else {
-                    model.forward(&input)
+                // EL GRAFO SE LIBERA ANTES DEL OPTIMIZADOR, y no es cosmético.
+                // Los pesos se comparten con el grafo por `Arc`; si el grafo
+                // sigue vivo, `make_mut` del optimizador copia CADA parámetro
+                // en CADA paso. No daría error: sólo andaría lento. Por eso el
+                // ámbito, y por eso el contador de copias de más abajo.
+                let (loss_v, grads) = {
+                    let logits = if tcfg.persist {
+                        model.forward_carrying(&input, &mut estados)
+                    } else {
+                        model.forward(&input)
+                    };
+                    let loss = crate::tensor::ops::cross_entropy(&logits, &target);
+                    let v = loss.data[0];
+                    let g = if gate.should_learn(v) {
+                        Some(crate::prof::time(crate::prof::P::Backward, || backward(&loss)))
+                    } else {
+                        None
+                    };
+                    (v, g)
                 };
-                let loss = crate::tensor::ops::cross_entropy(&logits, &target);
-                let loss_v = loss.data[0];
-                if gate.should_learn(loss_v) {
+                if let Some(grads) = grads {
                     bwd += 1;
-                    let grads = crate::prof::time(crate::prof::P::Backward, || backward(&loss));
                     let mut params = model.parameters_mut();
                     crate::prof::time(crate::prof::P::Optim, || opt.step(&mut params, &grads));
                 }
@@ -164,6 +176,8 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
     save_model(&tcfg.out_path, &model).map_err(|e| format!("no se pudo guardar: {}", e))?;
     println!("eva: pico de memoria del proceso {:.1} MB", crate::local::peak_rss_mb());
     crate::tensor::held::informe(total_params);
+    let copias = crate::optim::copias_de_parametros();
+    println!("  copias de parámetros por Arc compartido: {copias}  (tiene que ser 0)");
     if n_val > 0 {
         // Con estado limpio: comparable con cualquier corrida.
         let vl = eval_loss(&model, &ds, n_train, n_windows);

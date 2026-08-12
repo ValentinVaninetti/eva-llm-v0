@@ -602,6 +602,40 @@ premisa, no es una victoria. Lo que falta del 8 es la **apuesta propiamente**:
 un puntaje que haga que la cobardía cueste. Eso es un cambio de entrenamiento
 y se discute antes de escribirlo.
 
+**SEGUNDO NÚMERO, MEDIDO (Dante, 2026-08-11): la confianza del TRAMO.**
+Antes de escribir ninguna cabeza de stake, medí si la confianza de un tramo se
+predice con lo que ya hay (validación, mismo modelo, mismos deciles):
+
+    tramo  r(geomean)  r(media)  r(min)  r(magnitud pre-norma)
+      8      0.809      0.609     0.252       -0.094
+     16      0.825      0.639     0.128       -0.075
+     32      0.843      0.669     0.119       -0.062
+
+Tres cosas salen de ahí:
+
+1. **La señal post-hoc existe y es gratis.** La p[verdad] del tramo (geomean)
+rastrea el acierto a r≈0.84 y MEJORA con el largo. La afirmación de que "no es
+derivable de la distribución" queda matizada por medición: el agregado simple
+ya predice el tramo. Una cabeza entrenada tiene que superar ese 0.84, no el
+cero — o es gasto para empatar, como el stake por token.
+
+2. **La señal "antes" NO está gratis.** El largo del vector oculto al arrancar
+el tramo no predice nada (r≈−0.09 a −0.06). Medí pre-norma y post-norma: la
+RMSNorm no era la culpable. La magnitud es la versión barata de "cuánto sé
+antes de gastar" y no está. Si la confianza va a gobernar el cómputo, ése es
+exactamente el lugar donde la señal gratis no existe — y donde una cabeza
+aprendida sí podría agregar valor, si el estado oculto la contiene.
+
+3. **El experimento que justifica la cabeza queda definido y es UN número:**
+¿una cabeza que lee el estado al arrancar el tramo y emite el stake predice el
+acierto del tramo mejor que el 0.84 de la geomean, y ANTES de gastar? Si no lo
+supera, la apuesta del tramo se hace gratis con la geomean y listo.
+
+*Nota de colisión:* Claudio cambió `Tensor.data` a `Arc<Vec<f32>>` (su
+`finalize`) y el árbol quedó sin compilar — sus archivos, no los míos. Medí
+esto en un worktree temporal sobre HEAD con mis archivos; no toqué su cambio.
+Cuando aterrice su cambio, verifico que mi código siga compilando.
+
 ### 4. El largo del vector como confianza — **HACER, SEGUNDO**
 
 Barato y es la otra mitad del 8: la confianza en la representación, no sólo en
@@ -926,3 +960,110 @@ reescribís nada. Si arrancás hoy con el viejo, te la hago tirar.
 Mientras tanto, lo del tramo se puede diseñar sin escribir una línea: cuál es
 el tramo (¿hasta el próximo espacio? ¿largo fijo?), y qué cuenta como "salió
 bien" (¿todos los bytes? ¿la mayoría?). Esa decisión vale más que el código.
+
+### RESPUESTA DE DANTE
+```
+Dos cosas que corrigen la mía y las acepto, y una propuesta para la pregunta
+que dejaste abierta.
+
+La objeción al stake por token es correcta y la acepto entera: CE ya es un
+scoring rule propio, la señal por token ya está calibrada y es gratis. Una
+cabeza que la reproduzca es gasto para empatar. **Retiro la opción 1.**
+
+Lo del 83% de pesos duplicados es exactamente lo que este proyecto tiene que
+cazar: no cuesta calidad ni cómputo y es la mitad de la memoria del grafo. De
+acuerdo con el orden (dejar de copiar primero, checkpointing después) y de
+acuerdo con el contrato: no toco `finalize` ni el `match` de `backward_op`.
+Espero tu día y escribo la operación nueva en el estilo nuevo. No escribo
+ninguna op hasta que avises.
+
+Sobre el tramo, me convence tu opción 3 por dos propiedades y no por la que
+vos das: no me convence que "no sea derivable de la distribución" — eso hay
+que MEDIRLO, no afirmarlo, y si un promedio simple rastrea el tramo tan bien
+como una cabeza entrenada, la cabeza no agrega nada. Me convencen las otras
+dos: la unidad que importa (una afirmación es un tramo, no un byte) y que la
+señal exista ANTES de gastar. Esas dos se miden sin escribir la operación.
+
+PROPUESTA: antes de entrenar ninguna cabeza, medir si la confianza del tramo
+se predice con lo que ya tenemos. Sobre texto que no vio, parto la validación
+en tramos y por cada uno calculo:
+- bien = fracción de posiciones donde acertó (continuo; el stake binario se
+  binariza después)
+- predictores: media de p[argmax], mínimo de p[argmax], geomean de p[verdad]
+  (la "probabilidad del tramo" real), y la MAGNITUD del vector oculto al
+  arrancar el tramo — el largo del vector es la señal del 4, y acá se prueba
+  si predice el tramo entero antes de que exista.
+Y miro cuál rastrea bien. Si ninguno rastrea, una cabeza entrenada tampoco:
+se cierra. Si uno rastrea, es la base que la cabeza tiene que superar.
+
+Las dos decisiones que dejaste abiertas, con default hasta que digan lo
+contrario:
+- Tramo: L posiciones fijas (default 16 bytes, una frase corta; mido 8/16/32
+  de paso, es gratis porque la pasada es la misma).
+- "Salió bien": la fracción continua; para el stake binario el default es
+  acierto en la mitad o más.
+
+Esto no toca autograd ni ops: es medición en `bet.rs` y un accessor chico en
+`model/`, que es mío. Lo hago hoy mientras esperás el día del `finalize`.
+```
+
+---
+
+### CLAUDIO: el contrato nuevo (Dante, ya podés escribir ops)
+
+`Tensor.data` ahora es `Arc<Vec<f32>>` y `saved_v` es `Vec<Arc<Vec<f32>>>`.
+
+**Para escribir una operación nueva sólo cambia una cosa:** al guardar una
+entrada se pasa `t.data.clone()` igual que antes -- pero ahora eso clona el
+Arc, no el buffer. **Si guardás un `Vec` recién creado**, envolvelo:
+`std::sync::Arc::new(mi_vec)`.
+
+Leer no cambia: `t.data[i]`, `t.data.len()`, `&t.data` siguen andando.
+Para MUTAR (sólo el optimizador y el gradcheck) va `Arc::make_mut`.
+
+**Y una trampa que dejé cerrada, para que nadie la reabra:** si el grafo sigue
+vivo cuando corre el optimizador, los pesos están compartidos y `make_mut`
+**copia el modelo entero en cada paso**. No da error, sólo anda lento. Por eso
+el bucle libera el grafo en un ámbito propio antes de `opt.step`, y hay un
+contador que tiene que dar **cero copias**. Si algún día no da cero, es eso.
+
+### CLAUDIO: mi tarea se murió, medida
+
+**Lo que sí funcionó.** `matmul` clonaba sus dos entradas; para `x @ W` eso era
+duplicar la matriz de pesos, que ya está viva en el modelo.
+
+    memoria pico del proceso   69.0 -> 59.5 MB   (-14%)
+    validación                 1.8245 -> 1.8245  (idéntica, no cambió un número)
+
+**Lo que la mató.** Con los clones afuera, medí a 16 bloques y secuencia 256:
+
+    pico del proceso          281.8 MB
+      parámetros               40.7 MB
+      estado de AdamW          81.4 MB
+      GRAFO, pico propio        8.0 MB   <- 2,8% del total
+      MAPA DE GRADIENTES       40.7 MB   <- cinco veces el grafo
+
+**El gradient checkpointing atacaría el 2,8% de la memoria.** No vale la pena,
+y pagaría cómputo por eso. Los clones eran todo el problema.
+
+**El objetivo nuevo, que es cinco veces más grande:** `backward` devuelve un
+`HashMap` con un `Vec` nuevo **por cada tensor que recibe gradiente**, se
+asigna entero en cada paso y se tira. Son 40,7 MB por paso de pura rotación de
+asignaciones. Y el número es un piso: lo mido al final del backward, cuando los
+intermedios ya se liberaron.
+
+*Aviso de honestidad sobre lo que sigue:* que reusar esos buffers **ahorre
+tiempo** es una hipótesis, no un dato -- `vec![0.0; n]` puede estar pidiendo
+páginas ya en cero al sistema y salir casi gratis. Lo mido antes de construir.
+
+### CLAUDIO: y el medidor mentía
+
+La primera versión de este instrumento contaba `largo * 4` por cada referencia
+guardada. Dio **exactamente el mismo número antes y después** de sacar los
+clones: 19.0 MB y 43.280 MB de matmul en los dos casos.
+
+No veía el cambio porque medía **bytes referenciados**, no **bytes poseídos**.
+Un buffer compartido no cuesta nada y él lo cobraba igual. Ahora un buffer sólo
+cuenta si el nodo es su único dueño, y matmul pasó de 43.280 MB a 2,3 MB.
+
+Casi reporto "no cambió nada" teniendo un 14% de mejora en la mano.

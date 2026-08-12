@@ -13,6 +13,7 @@
 //! las divisiones del lazo.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 use crate::pool::Ptr;
 use crate::tensor::Tensor;
@@ -21,6 +22,27 @@ use crate::tensor::Tensor;
 /// tensor chico se termina antes. Los parámetros que importan (las matrices de
 /// dim x ffn) tienen cientos de miles de elementos y caen del lado de arriba.
 const SPLIT_FROM: usize = 32_768;
+
+/// Cuántas veces `make_mut` tuvo que COPIAR un parámetro porque el buffer
+/// estaba compartido.
+///
+/// Tiene que ser cero. Si sube, alguien dejó el grafo vivo cuando corre el
+/// optimizador y se está copiando el modelo entero en cada paso -- sin error,
+/// sólo lento. Es el modo de falla que este proyecto ya sufrió demasiadas
+/// veces, así que se cuenta.
+static COPIAS: AtomicUsize = AtomicUsize::new(0);
+
+pub fn copias_de_parametros() -> usize {
+    COPIAS.load(Relaxed)
+}
+
+/// Muta el buffer del tensor, contando si hubo que copiar.
+fn mutar(t: &mut Tensor) -> &mut Vec<f32> {
+    if std::sync::Arc::strong_count(&t.data) > 1 {
+        COPIAS.fetch_add(1, Relaxed);
+    }
+    std::sync::Arc::make_mut(&mut t.data)
+}
 
 pub struct AdamW {
     pub lr: f32,
@@ -81,12 +103,17 @@ impl AdamW {
             let pool = crate::pool::global();
             let chunks = if n < SPLIT_FROM { 1 } else { pool.workers() + 1 };
             if chunks <= 1 {
-                update(&mut p.data, g, m, v, c);
+                // `make_mut` copia SÓLO si el buffer está compartido. En el
+                // bucle de entrenamiento el grafo ya se liberó cuando se llega
+                // acá, así que el contador está en uno y no copia nada. Si
+                // alguna vez copia, es que alguien dejó el grafo vivo -- y se
+                // nota como una caída de velocidad, no como un error.
+                update(mutar(p), g, m, v, c);
                 continue;
             }
 
             let per = n.div_ceil(chunks);
-            let (pp, gp) = (Ptr(p.data.as_mut_ptr()), Ptr(g.as_ptr()));
+            let (pp, gp) = (Ptr(mutar(p).as_mut_ptr()), Ptr(g.as_ptr()));
             let (mp, vp) = (Ptr(m.as_mut_ptr()), Ptr(v.as_mut_ptr()));
             pool.run(chunks, move |i| {
                 let lo = i * per;

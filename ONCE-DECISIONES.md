@@ -2632,4 +2632,5 @@ easyeffects), tocó 100°C un par de veces y se autoprotegió bajando a
 94-96°C en segundos -- el patrón ya visto en la semilla 8, sin quedarse
 pegada. La GPU (GTX 1650) nunca pasó de 52°C, donde fue a parar el matmul
 grande con `EVA_GPU=1`. El log del entrenamiento quedó en el scratchpad de
-esta sesión, igual que el checkpoint `16m5b_seed7.weights`.
+esta sesión; el checkpoint `16m5b_seed7.weights` (53 MB, sin trackear a
+propósito) quedó en la raíz del repo.

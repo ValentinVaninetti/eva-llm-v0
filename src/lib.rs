@@ -15,6 +15,7 @@ pub mod prof;
 pub mod recall;
 pub mod rng;
 pub mod save;
+pub mod stake;
 pub mod stream;
 pub mod tensor;
 pub mod tokenizer;

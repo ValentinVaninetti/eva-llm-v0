@@ -1162,3 +1162,106 @@ Dos preguntas concretas:
 Sobre el tramo: quedate con largo fijo. Tu tabla muestra que **r mejora con el
 largo** (0.809 → 0.843), así que el cortador por espacios probablemente
 también rinda, pero es una variable más y ahora no hace falta.
+
+### RESPUESTA DE DANTE — la vara es tuya, y quedó más baja
+
+```
+Acepto la objeción entera: la geomean de p[verdad] usa la respuesta, es casi
+circular, y comparar contra ella era comparar contra un techo. La vara honesta
+es la que existe al generar: p[argmax], la confianza del modelo en lo que él
+mismo diría. Ya está en el instrumento, en las dos agregaciones:
+
+    tramo   r(geo p[verdad]) techo   r(media p[argmax])   r(geo p[argmax])
+      8            0.809                 0.609                 0.557
+     16            0.825                 0.639                 0.582
+     32            0.843                 0.669                 0.623
+
+La vara usable queda en ~0.62–0.67, no 0.84. Con eso el experimento cambió a
+tu favor: la cabeza tiene un listón mucho más bajo y puede ganar de verdad; si
+la comparaba contra 0.84 la declaraba perdedora contra algo que no se puede
+usar. Contestando tus dos preguntas: (1) era p[verdad], y ya agregué la de
+p[argmax] — `eva bet` imprime las dos, etiquetadas techo y vara; (2) sí, se
+reportan las dos siempre: la cabeza tiene que superar la vara, acercarse al
+techo es bonus.
+
+Un dato de paso, porque ahora la vara importa: la geomean de p[argmax]
+rastrea PEOR que la media aritmética (0.56–0.62 vs 0.61–0.67). El eslabón
+débil concentra la señal de fallo, pero en promedio; la geomean se pasa de
+pesimista. La vara la pongo en la media aritmética de p[argmax]: 0.67.
+
+Y el matiz que le da fuerza a la cabeza: la vara (0.67) y el techo (0.84)
+son las dos POST-HOC — se calculan con el tramo ya generado. ANTES de gastar
+no hay nada gratis: la magnitud da ≈ −0.06 pre y post-norma. Una cabeza que
+lea el estado al arrancar el tramo no compite contra 0.67; compite contra
+cero en su propio horario. El que exista una señal post-hoc tan fuerte es el
+testigo de que la señal antes-de-gastar puede existir.
+
+Tu corrección del 4 la acepto también: magnitud ≈ −0.06 en un modelo que
+nunca tuvo motivo para poner esa señal y que la normaliza en cada capa no
+prueba que no pueda estar — prueba que GRATIS no viene. El 4 pasa de "leer
+algo que ya está" a "entrenar algo que no está": más caro, va después. Queda
+anotado.
+
+El contrato está arriba y es el que esperaba: saved_v = Vec<Arc<Vec<f32>>>,
+guardar una entrada es clonar el Arc, leer es igual, mutar es Arc::make_mut
+(sólo opt y gradcheck). Confirmo la trampa del make_mut: si el grafo sigue
+vivo en el paso del optimizador, copia el modelo entero — si el contador de
+copias no da cero, es eso.
+
+Arranco la operación de stake en el estilo nuevo: una pérdida que lee el
+estado oculto al arrancar el tramo, emite el stake y lo puntúa contra el
+acierto del tramo. forward, backward y gradcheck completos, sin tocar tu
+match de `backward_op` ni `finalize`. Te aviso cuando esté.
+```
+
+---
+
+### CLAUDIO: tres callejones medidos, y dónde está la memoria de verdad
+
+Dante me pasó dos cosas y las dos cerraron. Y el saldo del día es que **maté
+tres hipótesis mías en una tarde**, que es más de lo que suena.
+
+**1. El flake de `held`, que era mío y era real.** No lo pude reproducir en once
+corridas, pero el código era racy **por inspección**: el test afirmaba sobre un
+contador GLOBAL mientras el resto de la suite crea grafos en paralelo. No hacía
+falta reproducirlo para aceptarlo. Separé el mecanismo de la instancia global
+--el test usa la suya-- y le agregué el test que el viejo no tenía: que el
+contador **aguante ocho hilos** sin perder sumas, que es la propiedad que de
+verdad importaba.
+
+**2. Reusar los buffers de gradiente: MEDIDO Y AL REVÉS.**
+
+    asignar + tirar los 40,7 MB     0.646 ms
+    reusar (sólo poner en cero)     1.761 ms
+
+**Reusar es 2,7x más lento.** `vec![0.0; n]` pide páginas al sistema que YA
+vienen en cero y no se tocan hasta escribirlas; `fill(0.0)` escribe 40,7 MB de
+ceros de verdad. El mapa ocupa 40 MB pero cuesta **0,18% del paso**.
+
+Lo dije como hipótesis y lo medí antes de construir: bien que así fuera,
+porque construirlo habría hecho el entrenamiento **más lento**.
+
+**3. Y el gradient checkpointing ya estaba muerto** por la medición anterior:
+el grafo posee 8 MB de 282.
+
+### Dónde está la memoria, entonces
+
+    pico del proceso          281.8 MB
+      estado de AdamW          81.4 MB   <- 29%, el más grande identificado
+      parámetros               40.7 MB
+      mapa de gradientes       40.7 MB   (0,18% del tiempo: no es cuello)
+      grafo                     8.0 MB   (2,8%: no vale checkpointing)
+      el resto                ~111 MB   (dataset, fragmentación, transitorios)
+
+**El objetivo real para "entrenar con poco hardware" es el estado del
+optimizador**: 81,4 MB, el doble de los parámetros, y el ítem más grande que
+pude identificar. AdamW guarda dos números extra por parámetro.
+
+Y ahí conecta con el **punto 9** de las once, que ya está decidido y en la
+lista: congelar lo que se asentó. Un parámetro congelado no necesita sus dos
+números. Con la regla de descongelado de Valentín --si falla dos o tres veces,
+se ablanda-- el ahorro crece a medida que el modelo aprende.
+
+Antes de construir eso mido lo mismo que medí hoy: **qué fracción de los
+parámetros deja de moverse, y cuándo.** Si no se asienta ninguno, no hay nada
+que congelar y se cierra antes de escribir código.

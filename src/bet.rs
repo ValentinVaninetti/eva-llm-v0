@@ -190,7 +190,7 @@ impl Calibration {
     }
 }
 
-fn pearson(xs: &[f64], ys: &[f64]) -> f32 {
+pub fn pearson(xs: &[f64], ys: &[f64]) -> f32 {
     if xs.len() < 2 {
         return 0.0;
     }
@@ -288,7 +288,12 @@ pub struct SpanAnalysis {
     /// Correlación de cada predictor con `bien`, sobre los tramos.
     pub r_media: f32,
     pub r_min: f32,
+    /// geomean de p[verdad]: la "probabilidad del tramo" real, pero usa la
+    /// respuesta — es el TECHO (oráculo), no la vara.
     pub r_geomean: f32,
+    /// geomean de p[argmax]: la confianza del modelo en lo que él mismo diría,
+    /// disponible al generar — esta es la VARA usable.
+    pub r_geomean_argmax: f32,
     pub r_magnitud: f32,
 }
 
@@ -300,10 +305,12 @@ fn span_r(xs: &[f64], ys: &[f64]) -> f32 {
 /// Parten las observaciones en tramos de `span_len` dentro de cada ventana de
 /// `seq` y mide si el acierto del tramo (`bien`) se predice con:
 ///
-/// * `media` — promedio de p[argmax] (la agregación más simple)
+/// * `media` — promedio de p[argmax] (la agregación más simple, usable)
 /// * `min` — el eslabón más débil del tramo
 /// * `geomean` — media geométrica de p[verdad]: la "probabilidad del tramo"
-///   real que le da el modelo a lo que escribió
+///   real que le da el modelo a lo que escribió — TECHO, usa la respuesta
+/// * `geomean_argmax` — media geométrica de p[argmax]: la confianza en lo que
+///   el modelo diría, usable al generar — VARA honesta
 /// * `magnitud` — largo del vector oculto AL ARRANCAR el tramo (la señal del
 ///   4, disponible antes de que el tramo exista)
 ///
@@ -313,6 +320,7 @@ pub fn span_analysis(obs: &[TokenObs], seq: usize, span_len: usize) -> SpanAnaly
     let mut xs_media = Vec::new();
     let mut xs_min = Vec::new();
     let mut xs_geomean = Vec::new();
+    let mut xs_geomean_argmax = Vec::new();
     let mut xs_mag = Vec::new();
     let mut ys = Vec::new();
     let mut n = 0usize;
@@ -328,20 +336,24 @@ pub fn span_analysis(obs: &[TokenObs], seq: usize, span_len: usize) -> SpanAnaly
             let mut media = 0.0f64;
             let mut min = f64::INFINITY;
             let mut loggeo = 0.0f64;
+            let mut loggeo_argmax = 0.0f64;
             let mut ok = 0usize;
             for o in &obs[t..t + span_len] {
                 media += o.conf as f64;
                 min = min.min(o.conf as f64);
                 loggeo += (o.p_target as f64).max(1e-9).ln();
+                loggeo_argmax += (o.conf as f64).max(1e-9).ln();
                 ok += o.correct as usize;
             }
             let m = media / span_len as f64;
             let geo = (loggeo / span_len as f64).exp();
+            let geo_argmax = (loggeo_argmax / span_len as f64).exp();
             let mag = obs[t].hidden_norm as f64;
             let bien = ok as f64 / span_len as f64;
             xs_media.push(m);
             xs_min.push(min);
             xs_geomean.push(geo);
+            xs_geomean_argmax.push(geo_argmax);
             xs_mag.push(mag);
             ys.push(bien);
             n += 1;
@@ -358,6 +370,7 @@ pub fn span_analysis(obs: &[TokenObs], seq: usize, span_len: usize) -> SpanAnaly
         r_media: span_r(&xs_media, &ys),
         r_min: span_r(&xs_min, &ys),
         r_geomean: span_r(&xs_geomean, &ys),
+        r_geomean_argmax: span_r(&xs_geomean_argmax, &ys),
         r_magnitud: span_r(&xs_mag, &ys),
     }
 }
@@ -496,6 +509,7 @@ mod tests {
         assert_eq!(a.n, 4);
         assert!((a.bien_global - 0.5).abs() < 0.01, "bien global {}", a.bien_global);
         assert!(a.r_geomean > 0.99, "r_geomean {}", a.r_geomean);
+        assert!(a.r_geomean_argmax > 0.99, "r_geomean_argmax {}", a.r_geomean_argmax);
         assert!(a.r_magnitud > 0.99, "r_magnitud {}", a.r_magnitud);
         assert!(a.r_media > 0.99, "r_media {}", a.r_media);
     }
@@ -511,5 +525,6 @@ mod tests {
         }
         let a = span_analysis(&obs, 4, 2);
         assert!(a.r_geomean.is_finite(), "r_geomean {}", a.r_geomean);
+        assert!(a.r_geomean_argmax.is_finite(), "r_geomean_argmax {}", a.r_geomean_argmax);
     }
 }

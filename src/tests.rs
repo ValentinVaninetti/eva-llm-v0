@@ -182,6 +182,32 @@ fn sum_of(t: &Tensor) -> f32 {
     t.data.iter().sum()
 }
 
+#[test]
+fn gradcheck_stake_loss() {
+    // La cabeza de stake: derivadas analíticas contra numéricas en las tres
+    // entradas. Si el backward estuviera mal no fallaría nada en entrenamiento,
+    // sólo aprendería peor -- y el número que promete el 8 no valdría.
+    let (s, d, span) = (8usize, 4usize, 4usize);
+    let mut hidden = param((0..s * d).map(|i| 0.3 * (i % 5) as f32 - 0.4).collect(), vec![s, d]);
+    let mut w = param(vec![0.2, -0.3, 0.5, 0.1], vec![d]);
+    let mut b = param(vec![0.7], vec![1]);
+    let bien = vec![0.5, 0.25];
+
+    let loss = ops::stake_loss(&hidden, &w, &b, &bien, span);
+    let grads = backward(&loss);
+    let gh = grads.get(&hidden.id).cloned().unwrap();
+    let gw = grads.get(&w.id).cloned().unwrap();
+    let gb = grads.get(&b.id).cloned().unwrap();
+
+    let f = |h: &Tensor, ww: &Tensor, bb: &Tensor| sum_of(&ops::stake_loss(h, ww, bb, &bien, span));
+    let nh = numeric(&mut hidden, |h| f(h, &w, &b), 1e-3);
+    let nw = numeric(&mut w, |ww| f(&hidden, ww, &b), 1e-3);
+    let nb = numeric(&mut b, |bb| f(&hidden, &w, bb), 1e-3);
+    check(&gh, &nh, "hidden");
+    check(&gw, &nw, "w");
+    check(&gb, &nb, "b");
+}
+
 fn cm_sum(q: &Tensor, k: &Tensor, v: &Tensor, g: &Tensor, alpha: &Tensor, beta: &Tensor) -> f32 {
     let t = ops::clockmem(&q.detach(), &k.detach(), &v.detach(), &g.detach(), &alpha.detach(), &beta.detach());
     t.data.iter().sum()

@@ -247,6 +247,63 @@ pub fn cross_entropy(logits: &Tensor, targets: &[usize]) -> Tensor {
     finalize(&[logits], "ce", vec![loss], vec![], vec![logits.data.clone()], vec![], targets.to_vec())
 }
 
+/// 8. QUE APUESTE — la cabeza de stake por tramo.
+///
+/// Una pérdida que lee el estado oculto AL ARRANCAR cada tramo de `span_len`
+/// posiciones, emite un stake `s = sigmoid(w·h + b)` y lo puntúa contra cuánto
+/// salió bien el tramo (`bien` = fracción de posiciones acertadas):
+/// `loss = mean (s - bien)²`.
+///
+/// POR QUÉ ES ASÍ:
+/// - `hidden` entra detached desde el entrenamiento: la cabeza es una sonda
+///   sobre el estado del modelo, no le manda gradiente. Que el gradiente cruce
+///   es la decisión 4, más cara, y se mide recién si esta sonda gana.
+/// - `bien` no es diferenciable (es acierto de argmax), por eso entra como
+///   dato calculado afuera y vive en `saved_f`, igual que los targets de la CE.
+/// - `saved_v` guarda `hidden` y `w` por referencia (Arc): con el contrato
+///   nuevo guardar no copia el buffer.
+pub fn stake_loss(
+    hidden: &Tensor,
+    w: &Tensor,
+    b: &Tensor,
+    bien: &[f32],
+    span_len: usize,
+) -> Tensor {
+    assert_eq!(hidden.shape.len(), 2, "stake_loss expects hidden (S,D)");
+    assert_eq!(w.shape.len(), 1, "stake_loss expects w (D,)");
+    let (s, d) = (hidden.shape[0], hidden.shape[1]);
+    assert_eq!(w.shape[0], d, "w no tiene D elementos");
+    assert_eq!(b.shape.len(), 1, "stake_loss expects b (1,)");
+    assert_eq!(b.shape[0], 1, "b tiene que ser un escalar");
+    let k = bien.len();
+    let mut loss = 0.0f32;
+    let mut zs = vec![0.0f32; k];
+    for (kk, &bienk) in bien.iter().enumerate() {
+        let start = kk * span_len;
+        assert!(start + span_len <= s, "el tramo {kk} se sale de la ventana");
+        let mut z = b.data[0];
+        for j in 0..d {
+            z += w.data[j] * hidden.data[start * d + j];
+        }
+        zs[kk] = z;
+        let sval = 1.0 / (1.0 + (-z).exp());
+        let e = sval - bienk;
+        loss += e * e;
+    }
+    loss /= k.max(1) as f32;
+    let mut sf = bien.to_vec();
+    sf.extend_from_slice(&zs);
+    finalize(
+        &[hidden, w, b],
+        "stake_loss",
+        vec![loss],
+        vec![],
+        vec![hidden.data.clone(), w.data.clone()],
+        sf,
+        vec![span_len, k, s],
+    )
+}
+
 pub fn depthwise_conv1d(x: &Tensor, w: &Tensor, b: &Tensor, k: usize) -> Tensor {
     let (s, d) = (x.shape[0], x.shape[1]);
     let mut out = vec![0.0; s * d];

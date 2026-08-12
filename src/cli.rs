@@ -18,6 +18,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "gpu" => cmd_gpu(&args[1..]),
         "recall" => cmd_recall(&args[1..]),
         "bet" => cmd_bet(&args[1..]),
+        "stake" => cmd_stake(&args[1..]),
         "help" | "-h" | "--help" => {
             print_help();
             Ok(())
@@ -194,13 +195,67 @@ fn cmd_bet(args: &[String]) -> Result<(), String> {
 
     println!("\n=== TRAMOS (¿la confianza del tramo se predice con lo que ya hay?) ===");
     println!("  bien = fracción de posiciones acertadas dentro del tramo");
-    println!("  r(media)   = promedio de p[argmax]      |  r(min) = eslabón débil");
-    println!("  r(geomean) = p[verdad] del tramo        |  r(magnitud) = largo del vector AL ARRANCAR");
+    println!("  r(media) = promedio de p[argmax]   r(min) = eslabón débil");
+    println!("  r(geo_verdad) = p[verdad] del tramo (TECHO, usa la respuesta)");
+    println!("  r(geo_argmax) = p[argmax] del tramo (VARA usable al generar)");
+    println!("  r(magnitud) = largo del vector AL ARRANCAR");
     for &l in &[8usize, 16, 32] {
         let s = crate::bet::span_analysis(&obs, model.cfg.seq_len, l);
-        println!("  tramo {l:>2}: n={:>5}  bien {:.1}%  | r(media) {:.3}  r(min) {:.3}  r(geomean) {:.3}  r(magnitud) {:.3}",
-            s.n, 100.0 * s.bien_global, s.r_media, s.r_min, s.r_geomean, s.r_magnitud);
+        println!("  tramo {l:>2}: n={:>5}  bien {:.1}%  | r(media) {:.3}  r(min) {:.3}  r(geo_verdad) {:.3}  r(geo_argmax) {:.3}  r(magnitud) {:.3}",
+            s.n, 100.0 * s.bien_global, s.r_media, s.r_min, s.r_geomean, s.r_geomean_argmax, s.r_magnitud);
     }
+    Ok(())
+}
+
+/// 8. QUE APUESTE — el experimento decisivo: la cabeza de stake.
+///
+/// Entrena una SONDA (proyección lineal del estado oculto al arrancar el tramo)
+/// sobre un modelo ya entrenado y congelado, y la mide en la misma validación
+/// que `bet`: ¿r(stake vs bien) supera la vara libre (media p[argmax] ≈ 0.67)?
+/// Si no la supera, la apuesta se hace gratis con la geomean y el 8 se cierra.
+/// Si la supera, la señal existe antes de gastar y la cabeza vale su costo.
+fn cmd_stake(args: &[String]) -> Result<(), String> {
+    check_unknown(args, &["weights", "data", "val", "span", "epochs", "lr", "seed"])?;
+    let weights = flag(args, "weights").ok_or("stake requiere --weights")?;
+    let data = flag(args, "data").ok_or("stake requiere --data")?;
+    let model = load_model(&weights).map_err(|e| e.to_string())?;
+    let span = flag_num(args, "span", 16)?;
+    let epochs = flag_num(args, "epochs", 1)?;
+    let lr = flag_num(args, "lr", 3e-4)?;
+    let seed = flag_num(args, "seed", 0)? as u64;
+    let val: f32 = flag_num(args, "val", 0.1)?;
+
+    let ds = crate::data::TextDataset::from_file(&data, model.cfg.seq_len).map_err(|e| e.to_string())?;
+    let n = ds.num_windows();
+    if n == 0 {
+        return Err("el dataset es muy chico para el seq_len del modelo".into());
+    }
+    let n_val = (((n as f32) * val).round() as usize).clamp(1, n / 2);
+    let n_train = n - n_val;
+    println!("eva: modelo {} params | cabeza {} params (w+b)", model.param_count(), model.cfg.dim + 1);
+    println!("eva: {} ventanas, {} entrenan la sonda, {} validación (mismo corte contiguo que bet)",
+        n, n_train, n_val);
+    println!("eva: tramo = {span} posiciones, el modelo queda congelado (hidden detached)");
+
+    let (r_stake, n_tramos) =
+        crate::stake::entrenar_y_medir(&model, &ds, n_train, n_val, span, epochs, lr, seed);
+
+    // Las varas libres, medidas con la misma maquinaria que bet, sobre el
+    // mismo corte. La cabeza tiene que superar la vara; acercarse al techo es
+    // bonus.
+    let obs = crate::bet::scan(&model, &ds, n_train, n);
+    let s = crate::bet::span_analysis(&obs, model.cfg.seq_len, span);
+    println!("\n=== EL NÚMERO ===");
+    println!("  r(stake vs bien)   = {r_stake:.3}  (la cabeza, antes de gastar)");
+    println!("  r(media p[argmax]) = {:.3}  (VARA usable post-hoc)", s.r_media);
+    println!("  r(geo p[verdad])   = {:.3}  (TECHO, usa la respuesta)", s.r_geomean);
+    println!("  r(magnitud)        = {:.3}  (la señal gratis que NO existe)", s.r_magnitud);
+    let voto = if r_stake > s.r_media {
+        format!("LA CABEZA SUPERA LA VARA {:.3} -> la apuesta por tramo vive", s.r_media)
+    } else {
+        format!("LA CABEZA NO SUPERA LA VARA {:.3} -> la apuesta se hace gratis con la media", s.r_media)
+    };
+    println!("  VEREDICTO ({n_tramos} tramos): {voto}");
     Ok(())
 }
 
@@ -352,6 +407,7 @@ fn print_help() {
          \x20 eva gen --weights <archivo> [--prompt texto] [--tokens N] [--temp F] [--topk N]\n\
          \x20 eva info --weights <archivo>\n\
          \x20 eva bet --weights <archivo> --data <archivo> [--val F] [--bins N]\n\
+         \x20 eva stake --weights <archivo> --data <archivo> [--span N] [--epochs N] [--lr F]\n\
          \x20 eva help\n\n\
          OPCIONES DE TRAIN:\n\
          \x20 --seq N       ventana de contexto (default 64)\n\

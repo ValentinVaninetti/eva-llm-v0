@@ -472,6 +472,39 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
                 push(i, part);
             }
         }
+        "stake_loss" => {
+            // saved_v = [hidden, w], saved_f = [bien (K), z (K)], saved_u =
+            // [span_len, K, S]. La pérdida es mean_k (s_k - bien_k)² con
+            // s_k = sigmoid(z_k), así que cada tramo aporta
+            //   d/dz_k = g[0] * 2/K * (s_k - bien_k) * s_k * (1 - s_k)
+            // y de ahí se distribuye a w (Σ_k d_k·h_k), b (Σ_k d_k) y a la
+            // fila del estado oculto que arranca el tramo (d_k·w).
+            let hidden = &n.saved_v[0];
+            let w = &n.saved_v[1];
+            let span_len = n.saved_u[0];
+            let k = n.saved_u[1];
+            let s = n.saved_u[2];
+            let d = hidden.len() / s;
+            let bien = &n.saved_f[..k];
+            let zs = &n.saved_f[k..];
+            let scale = g[0] * 2.0 / k.max(1) as f32;
+            let mut gh = vec![0.0; hidden.len()];
+            let mut gw = vec![0.0; d];
+            let mut gb = 0.0;
+            for (kk, &zk) in zs.iter().enumerate() {
+                let sig = 1.0 / (1.0 + (-zk).exp());
+                let der = scale * (sig - bien[kk]) * sig * (1.0 - sig);
+                let start = kk * span_len;
+                for j in 0..d {
+                    gh[start * d + j] += der * w[j];
+                    gw[j] += der * hidden[start * d + j];
+                }
+                gb += der;
+            }
+            push(0, gh);
+            push(1, gw);
+            push(2, vec![gb]);
+        }
         _ => panic!("backward not implemented for op {}", n.op),
     }
     out

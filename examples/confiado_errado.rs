@@ -21,6 +21,16 @@
 //! mide directo: H(q) de Shannon sobre la distribución que ya devuelve
 //! `lookup_detail` (re-agregación, no op nueva), por banda de count. El
 //! número que la mata: si H no crece con el count, la teoría cae acá.
+//!
+//! Segunda extensión (cierre del hilo "cabeza de Valentín" / deliberación):
+//! H(p), la entropía de Shannon de la distribución de salida del MODELO
+//! (no de la tabla -- eso es H(q), arriba). Es la aproximación libre, de
+//! una sola pasada, a "si me hicieran generar de nuevo, ¿cuánto discreparía
+//! conmigo mismo" -- el costo de un muestreo múltiple real (self-
+//! consistency/debate), sin pagarlo. El número que la mata: si H(p) no
+//! separa nada que `p[argmax]` no separe ya, la línea barata de
+//! "deliberación" cierra. Re-agregación sobre logits ya calculados, cero
+//! op nueva.
 
 use eva_llm_v0::bet::classify_row;
 use eva_llm_v0::data::TextDataset;
@@ -36,12 +46,47 @@ struct Pos {
     /// H(q) en bits sobre la distribución de continuaciones de la tabla en
     /// esta posición. None si no hubo hit (banda "miss": no hay q).
     entropia: Option<f32>,
+    /// H(p) en bits sobre la distribución de salida del MODELO. Siempre
+    /// disponible -- no depende de que la tabla haya contestado.
+    h_p: f32,
 }
 
 /// Entropía de Shannon en bits (log2), 0*log2(0) := 0 por convención.
 fn shannon_bits(q: &[f32]) -> f32 {
     let nats: f32 = q.iter().filter(|&&p| p > 0.0).map(|&p| -p * p.ln()).sum();
     nats / std::f32::consts::LN_2
+}
+
+/// H(p) directo desde logits crudos: softmax + Shannon, sin op nueva.
+fn entropia_logits_bits(row: &[f32]) -> f32 {
+    let mx = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let exps: Vec<f32> = row.iter().map(|&z| (z - mx).exp()).collect();
+    let sum: f32 = exps.iter().sum();
+    let probs: Vec<f32> = exps.iter().map(|&e| e / sum).collect();
+    shannon_bits(&probs)
+}
+
+/// AUROC por rangos (Mann-Whitney), mismo método que `sonda_tabla.rs`.
+fn auroc(pares: &[(f64, bool)]) -> f64 {
+    let mut v: Vec<(f64, bool)> = pares.to_vec();
+    v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let n_pos = v.iter().filter(|(_, p)| *p).count() as f64;
+    let n_neg = v.len() as f64 - n_pos;
+    if n_pos == 0.0 || n_neg == 0.0 {
+        return 0.5;
+    }
+    let mut suma_rangos_pos = 0.0f64;
+    let mut i = 0usize;
+    while i < v.len() {
+        let mut j = i;
+        while j < v.len() && v[j].0 == v[i].0 { j += 1; }
+        let rango_medio = (i + 1 + j) as f64 / 2.0;
+        for k in i..j {
+            if v[k].1 { suma_rangos_pos += rango_medio; }
+        }
+        i = j;
+    }
+    (suma_rangos_pos - n_pos * (n_pos + 1.0) / 2.0) / (n_pos * n_neg)
 }
 
 const BANDAS: [&str; 5] = ["miss", "c=2", "3-9", "10-49", "50+"];
@@ -71,6 +116,7 @@ fn recolectar(
         for t in 0..input.len() {
             let row = &logits.data[t * vocab..(t + 1) * vocab];
             let (p_argmax, _, correcto, _) = classify_row(row, target[t]);
+            let h_p = entropia_logits_bits(row);
 
             // mismo indexado que Paso 0 / sonda_tabla, ya corregido una vez.
             let pos_global = wi * seq + t + 1;
@@ -80,7 +126,7 @@ fn recolectar(
             let entropia = hit.as_ref().map(|(q, _)| shannon_bits(q));
             let banda = banda_count(hit);
 
-            out.push(Pos { p_argmax, correcto, banda, entropia });
+            out.push(Pos { p_argmax, correcto, banda, entropia, h_p });
         }
     }
     out
@@ -219,6 +265,55 @@ fn entropia_por_banda(nombre: &str, posiciones: &[Pos]) {
     }
 }
 
+/// Cierre del hilo "deliberación barata": ¿H(p) predice acierto del modelo
+/// mejor, o al menos ADEMÁS, de lo que ya predice p[argmax] gratis? Si no,
+/// la aproximación de una sola pasada a "cuánto discreparía conmigo mismo"
+/// no aporta nada que la confianza ya no diga, y la línea barata cierra.
+fn hp_vs_pargmax(nombre: &str, posiciones: &[Pos]) {
+    let pool_pargmax: Vec<(f64, bool)> = posiciones.iter().map(|p| (p.p_argmax as f64, p.correcto)).collect();
+    // score = -H(p): menos entropía tiene que correlacionar con acierto,
+    // igual dirección que p[argmax].
+    let pool_hp: Vec<(f64, bool)> = posiciones.iter().map(|p| (-p.h_p as f64, p.correcto)).collect();
+
+    let auc_pargmax = auroc(&pool_pargmax);
+    let auc_hp = auroc(&pool_hp);
+
+    println!("\n=== {nombre}: EL NÚMERO -- H(p) vs p[argmax], n={} ===", posiciones.len());
+    println!("  AUROC p[argmax] (gratis, ya publicado hoy):        {auc_pargmax:.3}");
+    println!("  AUROC -H(p) (aprox. libre de \"discreparía conmigo\"): {auc_hp:.3}");
+
+    // Residual: dentro de zona segura (donde importan los errores caros),
+    // separa por mediana de H(p) -- si p[argmax] ya se comió toda la señal,
+    // las dos mitades tienen que salir con precisión pareja.
+    let seguros: Vec<&Pos> = posiciones.iter().filter(|p| p.p_argmax >= PISO_CONFIANZA).collect();
+    if seguros.len() >= 20 {
+        let mut hs: Vec<f32> = seguros.iter().map(|p| p.h_p).collect();
+        hs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mediana_h = hs[hs.len() / 2];
+        let (baja, alta): (Vec<&&Pos>, Vec<&&Pos>) = seguros.iter().partition(|p| p.h_p <= mediana_h);
+        let prec = |g: &[&&Pos]| -> f32 {
+            if g.is_empty() { return f32::NAN; }
+            g.iter().filter(|p| p.correcto).count() as f32 / g.len() as f32
+        };
+        let (p_baja, p_alta) = (prec(&baja), prec(&alta));
+        println!("\n  dentro de zona segura (p[argmax]>={PISO_CONFIANZA}), split por mediana H(p)={mediana_h:.3}:");
+        println!("    H(p) baja (más determinística)  precisión {:5.1}%  (n={})", 100.0 * p_baja, baja.len());
+        println!("    H(p) alta (menos determinística) precisión {:5.1}%  (n={})", 100.0 * p_alta, alta.len());
+        println!("    Δ: {:+.1} puntos", 100.0 * (p_alta - p_baja));
+    }
+
+    println!("\n=== {nombre}: VEREDICTO ===");
+    if auc_hp > auc_pargmax + 0.02 {
+        println!("  H(p) le gana a p[argmax] -- separa algo que la confianza sola no ve.");
+        println!("  Primera justificación barata real para pensar en la versión cara");
+        println!("  (muestreo múltiple de verdad). No cierra la línea, la abre.");
+    } else {
+        println!("  H(p) NO le gana a p[argmax] -- no separa nada nuevo. La aproximación");
+        println!("  libre de \"discreparía conmigo mismo\" no aporta sobre la confianza que");
+        println!("  ya está gratis. Cierra la línea barata de deliberación con este número.");
+    }
+}
+
 fn main() {
     let weights = std::env::args().nth(1).unwrap_or_else(|| "16m5b_seed7.weights".into());
     let data = std::env::args().nth(2).unwrap_or_else(|| "data/prosa250.txt".into());
@@ -244,9 +339,11 @@ fn main() {
     imprimir_tabla("DEV (mirar, no decide)", &pos_dev);
     numero_que_mata("DEV", &pos_dev);
     entropia_por_banda("DEV (mirar, no decide)", &pos_dev);
+    hp_vs_pargmax("DEV (mirar, no decide)", &pos_dev);
 
     let pos_val = recolectar(&model, &ds, &tabla, &ventanas_val, seq);
     imprimir_tabla("VAL (tocada una sola vez)", &pos_val);
     numero_que_mata("VAL", &pos_val);
     entropia_por_banda("VAL (tocada una sola vez)", &pos_val);
+    hp_vs_pargmax("VAL (tocada una sola vez)", &pos_val);
 }

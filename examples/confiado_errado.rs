@@ -281,11 +281,16 @@ fn hp_vs_pargmax(nombre: &str, posiciones: &[Pos]) {
     println!("\n=== {nombre}: EL NÚMERO -- H(p) vs p[argmax], n={} ===", posiciones.len());
     println!("  AUROC p[argmax] (gratis, ya publicado hoy):        {auc_pargmax:.3}");
     println!("  AUROC -H(p) (aprox. libre de \"discreparía conmigo\"): {auc_hp:.3}");
+    println!("  (el AUROC global de las dos casi no separa -- están pegadas por");
+    println!("  construcción, una distribución picuda tiene alto p[argmax] Y bajo H(p)");
+    println!("  a la vez. La pregunta que importa es la condicional, abajo.)");
 
     // Residual: dentro de zona segura (donde importan los errores caros),
     // separa por mediana de H(p) -- si p[argmax] ya se comió toda la señal,
-    // las dos mitades tienen que salir con precisión pareja.
+    // las dos mitades tienen que salir con precisión pareja. ESTE, no el
+    // AUROC global de arriba, es el número que decide el veredicto.
     let seguros: Vec<&Pos> = posiciones.iter().filter(|p| p.p_argmax >= PISO_CONFIANZA).collect();
+    let mut delta_condicional: Option<(f32, usize, usize)> = None;
     if seguros.len() >= 20 {
         let mut hs: Vec<f32> = seguros.iter().map(|p| p.h_p).collect();
         hs.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -300,18 +305,53 @@ fn hp_vs_pargmax(nombre: &str, posiciones: &[Pos]) {
         println!("    H(p) baja (más determinística)  precisión {:5.1}%  (n={})", 100.0 * p_baja, baja.len());
         println!("    H(p) alta (menos determinística) precisión {:5.1}%  (n={})", 100.0 * p_alta, alta.len());
         println!("    Δ: {:+.1} puntos", 100.0 * (p_alta - p_baja));
+        delta_condicional = Some((p_baja - p_alta, baja.len(), alta.len()));
     }
 
-    println!("\n=== {nombre}: VEREDICTO ===");
-    if auc_hp > auc_pargmax + 0.02 {
-        println!("  H(p) le gana a p[argmax] -- separa algo que la confianza sola no ve.");
-        println!("  Primera justificación barata real para pensar en la versión cara");
-        println!("  (muestreo múltiple de verdad). No cierra la línea, la abre.");
-    } else {
-        println!("  H(p) NO le gana a p[argmax] -- no separa nada nuevo. La aproximación");
-        println!("  libre de \"discreparía conmigo mismo\" no aporta sobre la confianza que");
-        println!("  ya está gratis. Cierra la línea barata de deliberación con este número.");
+    println!("\n=== {nombre}: VEREDICTO (sobre el delta CONDICIONAL, no el AUROC global) ===");
+    match delta_condicional {
+        Some((delta, n_baja, n_alta)) if delta > 0.03 && n_baja >= 30 && n_alta >= 30 => {
+            println!("  A confianza igual, H(p) separa {:.1} puntos de precisión (n={n_baja}/{n_alta}).", 100.0 * delta);
+            println!("  H(p) le agrega algo a p[argmax] que p[argmax] solo no ve. Primera");
+            println!("  justificación barata real para pensar en la versión cara (muestreo");
+            println!("  múltiple de verdad). No cierra la línea de deliberación, la abre.");
+        }
+        _ => {
+            println!("  Sin diferencia condicional clara (o n insuficiente) -- H(p) no agrega");
+            println!("  nada que p[argmax] no tuviera ya. Cierra la línea barata de deliberación.");
+        }
     }
+}
+
+/// Gate 2D, aprobado por Dante ("la pelota que dejaste"): zona segura más
+/// angosta que la de `numero_que_mata` (que sólo usa p[argmax]) -- exige
+/// TAMBIÉN que la forma del resto de la distribución sea determinística
+/// (H(p) bajo su propia mediana dentro de zona segura). Formaliza como
+/// medición propia lo que en `hp_vs_pargmax` salía como sub-producto.
+fn gate_2d(nombre: &str, posiciones: &[Pos]) {
+    let seguros: Vec<&Pos> = posiciones.iter().filter(|p| p.p_argmax >= PISO_CONFIANZA).collect();
+    if seguros.len() < 20 {
+        println!("\n=== {nombre}: gate 2D -- n insuficiente en zona segura ===");
+        return;
+    }
+    let mut hs: Vec<f32> = seguros.iter().map(|p| p.h_p).collect();
+    hs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mediana_h = hs[hs.len() / 2];
+
+    let prec_de = |g: &[&Pos]| -> f32 {
+        if g.is_empty() { return f32::NAN; }
+        g.iter().filter(|p| p.correcto).count() as f32 / g.len() as f32
+    };
+    let precision_1d = prec_de(&seguros);
+    let angosta: Vec<&Pos> = seguros.iter().filter(|p| p.h_p <= mediana_h).copied().collect();
+    let precision_2d = prec_de(&angosta);
+
+    println!("\n=== {nombre}: gate 2D -- p[argmax]≥{PISO_CONFIANZA} Y H(p)≤{mediana_h:.3} ===");
+    println!("  zona segura 1D (sólo p[argmax]):        precisión {:5.1}%  (n={})", 100.0 * precision_1d, seguros.len());
+    println!("  zona segura 2D (+H(p)≤mediana):         precisión {:5.1}%  (n={}, {:.0}% de la 1D)",
+        100.0 * precision_2d, angosta.len(), 100.0 * angosta.len() as f32 / seguros.len() as f32);
+    println!("  ganancia de precisión por angostar: {:+.1} puntos, a costo de {:.0}% menos cobertura",
+        100.0 * (precision_2d - precision_1d), 100.0 * (1.0 - angosta.len() as f32 / seguros.len() as f32));
 }
 
 fn main() {
@@ -340,10 +380,12 @@ fn main() {
     numero_que_mata("DEV", &pos_dev);
     entropia_por_banda("DEV (mirar, no decide)", &pos_dev);
     hp_vs_pargmax("DEV (mirar, no decide)", &pos_dev);
+    gate_2d("DEV (mirar, no decide)", &pos_dev);
 
     let pos_val = recolectar(&model, &ds, &tabla, &ventanas_val, seq);
     imprimir_tabla("VAL (tocada una sola vez)", &pos_val);
     numero_que_mata("VAL", &pos_val);
     entropia_por_banda("VAL (tocada una sola vez)", &pos_val);
     hp_vs_pargmax("VAL (tocada una sola vez)", &pos_val);
+    gate_2d("VAL (tocada una sola vez)", &pos_val);
 }

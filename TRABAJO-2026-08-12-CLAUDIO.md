@@ -71,3 +71,57 @@ encima.
 
 No toqué `src/`. Código en `examples/orden_cobertura.rs`, corrida real, sin
 promesas.
+
+---
+
+## Ronda 3 — Paso 1: la sonda detached (tarea, la pasa Dante)
+
+Tu propio Paso 1 del diseño (sección en el central), ahora contra la vara YA
+medida (~53%, no ~97%).
+
+**Qué hacer** (en un `examples/` nuevo, NO toques `src/`):
+1. Sobre `16m5b_seed7.weights`, una sola pasada de `forward_hidden` (público,
+   `src/model/mod.rs`) sobre las ventanas de validación, con las MISMAS
+   posiciones y labels del Paso 0 (`pos_global = wi*seq+t+1`).
+2. Dataset de sonda: pares `(hidden.detach(), table_correct)` con
+   `table_correct_i = (hit_i=1 ∧ count_i ≥ 2 ∧ argmax(q_i) == target_i)`.
+   Entrenás SÓLO la cabecita `g = sigmoid(w·h + b)` (detached, cero gradiente
+   al modelo).
+3. **Nuevo respecto de tu Paso 1:** estratificá el AUROC por banda de count
+   {2–4, 5–9, 10–49, 50+}. Esto ataca la anomalía de la ronda 2 (la vara BAJA
+   con count alto: 53.3 → 44.1). Si el AUROC sube donde la vara baja, el gate
+   por count es contraproducente y tu cabecita debería ignorarlo.
+4. Split de la sonda 50/50 de las ventanas de val (entrenar en la mitad,
+   AUROC en la otra mitad), mismo corpus/splits que tu Paso 0.
+
+**El número que la mata:** AUROC ≈ 0.5–0.55 en la mitad de eval (≈ azar
+contra una base de ~53%) → el modelo NO puede saber cuándo la tabla tiene
+razón → la cabecita muere acá, sin tocar `train.rs` una vez. Si el AUROC
+supera ~0.6, la cabecita sigue viva y pasamos al entrenamiento conjunto
+(β chico, tu plan).
+
+Compartí el número por banda, no la promesa.
+
+## Bloqueado: la lib no compila, no es cosa mía
+
+Escribí `examples/sonda_tabla.rs` completo (reusa `forward_hidden`,
+`Recall::lookup_detail`, `ops::stake_loss` con span_len=1 y `StakeHead` tal
+cual -- cero op nueva, cero cambio a `src/`) y no lo pude correr ni una vez
+porque **la librería entera no compila**, con código que no es mío,
+sin commitear, y en dos estados distintos en menos de una hora:
+
+1. **Primer intento:** `src/tensor/ops.rs:545`, `let (s, v) = x.shape;` --
+   `x.shape` es `Vec<usize>`, no se puede desestructurar así en una tupla.
+   Parece parte de un `softmax_rows` nuevo (comentario: "útil para mezclar
+   logits del modelo con logits de la tabla" -- pinta a la idea de suma de
+   logits en desarrollo).
+2. **Segundo intento** (ya arreglado el `(s, v)`): `src/mix.rs` llama a
+   `ops::mixed_ce` y `ops::mixed_ce_count`, que ya no están en `ops.rs`.
+   Alguien las sacó o les cambió nombre al meter la versión de logits y no
+   actualizó `mix.rs`.
+
+**No toqué nada de esto** -- ni el `(s, v)` de una línea que hubiera sido
+trivial arreglar, ni `mix.rs`. Es código de otra persona en curso, y me
+pidieron explícitamente no tocar `src/` para esta tarea. Documento acá para
+que Dante lo vea al ponerse al día: el Paso 1 está listo para correr apenas
+la lib vuelva a compilar, no hace falta que yo haga nada más hasta entonces.

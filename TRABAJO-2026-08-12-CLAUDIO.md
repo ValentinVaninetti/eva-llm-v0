@@ -125,3 +125,52 @@ trivial arreglar, ni `mix.rs`. Es código de otra persona en curso, y me
 pidieron explícitamente no tocar `src/` para esta tarea. Documento acá para
 que Dante lo vea al ponerse al día: el Paso 1 está listo para correr apenas
 la lib vuelva a compilar, no hace falta que yo haga nada más hasta entonces.
+
+---
+
+## URGENTE antes de seguir implementando: esto ya existe, verificado
+
+Valentín pidió que esto quede escrito ahora, no al cierre, porque afecta
+directo lo que se está construyendo en este momento (`mix.rs`, `softmax_rows`,
+la idea de "suma de logits"). Lo busqué y lo confirmé -- no es de memoria.
+
+**Es kNN-LM** (Khandelwal, Levy, Zettlemoyer, Lewis -- Stanford/FAIR, ICLR
+2020, *"Generalization through Memorization: Nearest Neighbor Language
+Models"*), y pega en las DOS cosas más grandes de la semana, no en una:
+
+1. **Nuestra hipótesis central (tabla + modelo chico ≈ modelo entero) es su
+   resultado fundacional.** Cita: *"entrenar un modelo con 100M de tokens y
+   usar kNN sobre un datastore de 3 mil millones puede superar a entrenar ese
+   mismo modelo con los 3 mil millones enteros."* Es nuestro punto 5, con más
+   ceros.
+2. **Lo que Dante encontró hoy a los golpes -- que mezclar la tabla en el
+   TARGET de entrenamiento mata el gradiente (`mixed_ce`, NEGATIVO MONÓTONO)
+   -- es la razón exacta por la que kNN-LM nunca lo hace así.** Su fórmula es
+   idéntica a la nuestra, término a término: `p = λ·p_LM + (1−λ)·p_kNN`. Pero
+   la usan **sólo en tiempo de evaluación** -- nunca entra a la pérdida de
+   entrenamiento. Y el λ se elige "a nivel de corpus, sobre un dev set" --
+   exactamente el barrido sobre desarrollo que ya usa `cmd_recall`.
+
+**Pasamos un día entero, con GPU real y el chip tocando 100°C, redescubriendo
+empíricamente algo publicado en 2019.** Si alguien leía el diseño de ese
+paper antes de escribir `mixed_ce`, ese camino se descartaba en diez minutos
+de lectura, no en tres corridas de 15 minutos cada una.
+
+**Lo que SÍ es distinto, para no ser injusto:** kNN-LM busca sobre embeddings
+densos con FAISS, un índice aproximado sobre un datastore gigante. Nosotros
+usamos coincidencia exacta de k-gramas -- más simple, más barato, y a esta
+escala probablemente suficiente. La idea es la misma; la implementación es
+más cruda, a propósito.
+
+**Lo que esto pide, concreto, antes de seguir con `softmax_rows`/la suma de
+logits:** buscar si ESA variante específica (inyectar `log(q)` en los logits
+en vez de interpolar en probabilidad) también tiene precedente -- huele a
+Product of Experts (Hinton, ~1999-2002), que tiene el mismo modo de falla en
+el caso extremo (un experto muy seguro fuerza la certeza del conjunto,
+gradiente cero igual, por otro camino matemático). No lo confirmé todavía --
+lo dejo como advertencia, no como veredicto, para que alguien lo chequee
+antes de invertir otra corrida de GPU.
+
+Fuentes: [Generalization through Memorization: Nearest Neighbor Language
+Models](https://www.alphaxiv.org/overview/1911.00172) · [Nearest Neighbor
+Language Models (OpenReview)](https://openreview.net/pdf?id=HklBjCEKvH)

@@ -5,6 +5,16 @@
 > (3000+ líneas). Acá está el estado al día, con punteros al gigante para
 > profundizar. Actualizado: 12-08-2026.
 
+> ⚠️ **ANTES DE SEGUIR CON `mix.rs` / `softmax_rows` / la suma de logits:**
+> nuestra hipótesis central Y el fracaso de hoy de `mixed_ce` **ya están
+> publicados** -- es **kNN-LM** (Khandelwal et al., ICLR 2020). Ellos
+> interpolan `p = λ·p_LM + (1−λ)·p_kNN` **sólo en inferencia, nunca en el
+> target de entrenamiento** -- exactamente la lección que costó un día de
+> GPU hoy. Detalle completo, fuentes, y la sospecha sin confirmar sobre la
+> "suma de logits" (Product of Experts, mismo modo de falla por otro
+> camino): `TRABAJO-2026-08-12-CLAUDIO.md`, sección "URGENTE antes de
+> seguir implementando". Leer antes de escribir la próxima línea.
+
 ## Reglas de la casa
 
 1. **Medir barato antes de construir.** Si no hay número, es propuesta, no hecho.

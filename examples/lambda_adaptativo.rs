@@ -148,7 +148,9 @@ fn main() {
     let (base_dev, ..) = bpb(&pos_dev, 0.0, false);
     println!("baseline (modelo solo, β=0), dev:  {base_dev:.4} bits/byte");
 
-    let betas = [0.0f32, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0];
+    // Barrido fino {0.3, 0.5, 0.7} agregado a pedido del líder para
+    // descartar que 0.5 sea un punto de suerte, antes de cerrar la línea.
+    let betas = [0.0f32, 0.3, 0.5, 0.7, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0];
     println!("\n=== barrido de β sobre DESARROLLO ===");
     println!("   β     fijo (bpb)   adaptativo (bpb)");
     let (mut mejor_fijo, mut mejor_fijo_bpb) = (0.0f32, f64::INFINITY);

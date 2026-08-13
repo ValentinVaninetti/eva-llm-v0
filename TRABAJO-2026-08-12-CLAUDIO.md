@@ -242,3 +242,48 @@ justifique construir igual -- es peor, y no cuesta nada.
 Esto no mata la línea -- la vuelve más barata de lo que yo mismo la había
 diseñado. Código en `examples/sonda_tabla.rs`, corrida real sobre
 `16m5b_seed7.weights`, sin tocar `src/`.
+
+---
+
+## Para Dante: ¿tocamos el mecanismo de aprendizaje, no sólo lo que lo rodea?
+
+Valentín pregunta si vale la pena mirar otro ángulo de "cómo aprende",
+porque hasta ahora todo lo que probamos (mezclar la tabla, saltar bloques,
+apostar, congelar) varía la ARQUITECTURA o la PÉRDIDA, pero abajo de todo
+sigue habiendo `backward()` + AdamW en cada experimento, sin excepción.
+Nunca tocamos el mecanismo de actualización en sí. Es para pensar, no para
+construir todavía -- quiero tu lectura antes de que nadie escriba código.
+
+**Primera versión que se me ocurrió, y la descarté yo mismo al aplicar bien
+el criterio "superhumano" de Valentín:** aprendizaje Hebbiano, porque así
+aprenden las neuronas. Error -- es copiar la LIMITACIÓN biológica (una
+neurona no puede calcular un gradiente global, no tiene forma de saber su
+efecto diez capas más adelante) cuando nosotros no tenemos ese problema:
+`backward()` ya calcula el gradiente exacto, y no es nuestro cuello de
+botella medido.
+
+**La versión que sí conecta con algo nuestro y medido:** el estado de
+AdamW -- 81,4 MB, el ítem de memoria más grande de todo el proyecto, más
+grande que los parámetros mismos (punto 9, `ESTADO.md`). Un cerebro no
+guarda dos números flotantes extra por sinapsis para siempre (momento +
+varianza, lo que hace Adam) -- usa trazas de elegibilidad, mucho más
+liviano, no cero pero bastante menos que 2x. La pregunta no es "¿abandonamos
+el gradiente exacto?" (eso tira lo único que no nos cuesta nada) -- es
+**¿hace falta el estado completo de Adam para tener pasos bien escalados, o
+alcanza con algo más liviano, sin tocar cómo se calcula el gradiente?**
+
+Ataca directo el cuello de botella que ya medimos, no una intuición nueva.
+Candidatos concretos para comparar (todos ya publicados, no busco
+inédito -- la vara es la de siempre: ¿gana medido contra lo que tenemos?):
+SGD con momentum simple (1 número extra, no 2), signSGD/Lion (1 estado,
+compite con Adam en algunos papers), o algo con estado COMPARTIDO por capa
+en vez de por parámetro.
+
+**El primer número que decide, antes de escribir nada:** entrenar el
+modelo de referencia con un optimizador más liviano (mismo `backward()`,
+mismos gradientes, sólo cambia el paso de actualización) y comparar val
+bpb contra el baseline de siempre, más cuánta memoria de estado se ahorra
+de verdad. Si pierde mucha calidad para ahorrar memoria que no era el
+cuello de botella real de un entrenamiento chico, se cierra en una tarde.
+
+¿Qué opinás? ¿Vale la pena, o hay algo que se me está escapando?

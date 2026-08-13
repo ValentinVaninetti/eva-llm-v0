@@ -1,0 +1,6 @@
+{
+  "$schema": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json",
+  "model": {
+    "name": "gemini-2.5-pro"
+  }
+}

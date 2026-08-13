@@ -2678,3 +2678,62 @@ Dos salvedades de metodología, para que la auditoría las pese:
 del tamaño chico. La tabla + modelo chico le gana al modelo entero en las
 dos escalas que pudimos medir, y por la misma cantidad relativa. Los puntos
 5 y 7 (el cuaderno adentro, el borrado dirigido) conservan su fundamento.
+
+---
+
+### CLAUDIO → DANTE: segunda pasada por BitVMX -- para pensar, no para construir
+
+Dante: cuando te pongas al día con esto, sumale este bloque -- Valentín pidió
+volver a mirar BitVMX, esta vez no buscando código sino conceptos ("lo que
+hicimos e hice en esa empresa"). Fui a los ~40 repos de la org (no sólo
+BitVMX-CPU) y al README del ecosistema completo. Esto es lo que salió.
+**Nada de esto se construye todavía -- es una candidata para pensar entre
+los tres, con la disciplina de siempre: medir barato antes de escribir una
+línea.**
+
+**Primero, lo aburrido y honesto:** de los ~40 repos (wallet, key manager,
+indexador de Bitcoin, RPC, broker de mensajes, ZK-proofs, garbled circuits,
+un intérprete de Bitcoin Script) -- cero código transportable. Es
+infraestructura de blockchain de punta a punta, ningún punto de contacto
+técnico con entrenar o correr una LLM. Ya lo tenía medido para BitVMX-CPU
+solo; ahora vale para la org entera.
+
+**Lo que sí vale la pena, y es un nivel más profundo que el hash del punto
+anterior:** el README del ecosistema describe BitVMX con esta frase, textual
+de ellos: *"ejecutar optimistamente programas arbitrarios en Bitcoin,
+aprovechando el paradigma de cómputo disputable de N partes."* No es un
+detalle técnico -- es la filosofía entera del proyecto: **asumí que la
+respuesta es honesta, y pagá el costo de investigar sólo cuando alguien la
+desafía.**
+
+Ya tenemos una versión chica de esa idea: la vara post-hoc del punto 8
+decide cuándo re-tirar una respuesta completa. Lo que NO llevamos hasta el
+final es la otra mitad de su técnica: **la búsqueda binaria sobre la traza
+para aislar el paso exacto en disputa, y verificar SÓLO ESE paso** -- no
+todo el programa de nuevo.
+
+**La candidata, concreta:** hoy, cuando la vara dice "esta respuesta larga
+tiene poca confianza", sólo sabemos dudar del tramo entero. Pero `bet.rs`
+ya sabe medir confianza por tramo -- si en vez de un tramo fijo bisectamos
+la respuesta a la mitad, medimos la confianza de cada mitad, y recursamos
+en la mitad peor, **localizamos dónde empezó el problema** en vez de
+sospechar de todo el bloque. Es su técnica de aislar el paso disputado,
+aplicada a "dónde arrancó a alucinar" en vez de "qué instrucción de RISC-V
+está mal".
+
+**Lo que NO se lleva, otra vez:** el "N partes que desconfían entre sí" no
+tiene con qué mapear acá -- hay un solo actor. La única forma de simular
+una segunda parte sería el autocontraste, y eso ya lo cerramos (es MC
+dropout, con abuela).
+
+**Antes de escribir el bisector, dos cosas pendientes y ninguna es código:**
+1. Chequear si esto ya existe con otro nombre en la literatura de
+   verificación de LLMs -- no lo busqué todavía, la idea es de hoy.
+2. El experimento barato que decide si vale la pena: con los datos que
+   `bet.rs` YA sabe producir, ¿la confianza de la mitad de un tramo malo es
+   sistemáticamente más baja en la mitad donde está el error, o es ruido?
+   Es un análisis de una tarde sobre mediciones que ya existen, no una
+   construcción nueva.
+
+Se los dejo a los dos para pensarlo -- no hay apuro ni compromiso de
+construir nada todavía.

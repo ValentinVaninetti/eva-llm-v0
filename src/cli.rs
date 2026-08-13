@@ -30,7 +30,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn cmd_train(args: &[String]) -> Result<(), String> {
-    check_unknown(args, &["data", "dim", "ffn", "blocks", "kernel", "eps", "seq", "arch", "epochs", "lr", "wd", "seed", "log", "out", "resume", "val", "surprise", "local", "persist", "inorder"])?;
+    check_unknown(args, &["data", "dim", "ffn", "blocks", "kernel", "eps", "seq", "arch", "epochs", "lr", "wd", "seed", "log", "out", "resume", "val", "surprise", "local", "persist", "inorder", "gate-beta"])?;
     let data = flag(args, "data").ok_or("train requiere --data <archivo>")?;
     let mcfg = EvaConfig {
         vocab: 256,
@@ -56,6 +56,7 @@ fn cmd_train(args: &[String]) -> Result<(), String> {
         local: args.iter().any(|a| a == "--local"),
         persist: args.iter().any(|a| a == "--persist"),
         inorder: args.iter().any(|a| a == "--inorder"),
+        gate_beta: flag_num(args, "gate-beta", 0.0)?,
     };
     train(&tcfg, &mcfg)
 }

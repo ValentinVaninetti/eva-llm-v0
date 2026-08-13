@@ -4,9 +4,66 @@ use crate::data::TextDataset;
 use crate::model::{EvaConfig, EvaModel};
 use crate::nn::Module;
 use crate::optim::AdamW;
+use crate::recall::Recall;
 use crate::save::{load_model, save_model};
 use crate::tensor::autograd::backward;
+use crate::tensor::Tensor;
 use crate::tokenizer::ByteTokenizer;
+
+// Ronda 3, benchmark final: el gate como regularizador de entrenamiento,
+// receta consolidada por Dante -- "enseñar donde la tabla es determinística,
+// no tocar donde nadie gana". A diferencia de `mixed_ce` (que mezclaba la
+// tabla en el TARGET y murió medido, monótono negativo), esto suma un sesgo
+// CONSTANTE (sin gradiente propio, `Tensor::new` no pide grad) a los logits
+// ANTES del softmax -- kNN-LM-en-eval trasladado a entrenamiento, con el
+// gradiente real fluyendo de vuelta al modelo a través de `add` (backward de
+// suma = identidad en ambos operandos, pero sólo `logits` tiene grafo).
+//
+// Gate por DETERMINISMO (H de Shannon de la tabla), no por confianza del
+// modelo (`p[argmax]`) como en el gate de eval -- a diferencia de eval, acá
+// hace falta una señal disponible desde el primer paso, cuando el modelo
+// todavía no dice nada útil. H_HIGH=2.0 es una lectura de las bandas ya
+// medidas hoy (c=2: 0.43 bits, 3-9: 0.87, 10-49: 1.47, 50+: 2.16) -- la
+// banda 50+ (irresoluble, nadie le gana) cae cerca de gate≈0, la banda c=2
+// (casi determinística) cerca de gate≈1. Interpretación explícita para que
+// se corrija si no es la intención: no barrida contra val, elegida por
+// lectura directa de un número ya publicado, no por ajuste.
+const GATE_CAP: f32 = 7.7; // mismo cap de Séneca que en lambda_adaptativo.rs
+const GATE_H_HIGH: f32 = 2.0;
+const GATE_EPS: f32 = 1e-9;
+
+fn shannon_bits(q: &[f32]) -> f32 {
+    let nats: f32 = q.iter().filter(|&&p| p > 0.0).map(|&p| -p * p.ln()).sum();
+    nats / std::f32::consts::LN_2
+}
+
+/// Sesgo [seq, vocab] a sumar a los logits crudos antes de la pérdida: cero
+/// donde la tabla no contestó, `β·gate·bias` donde sí. Construido con
+/// `Tensor::new` (requires_grad=false por defecto) -- constante para el
+/// grafo, el gradiente de la pérdida vuelve intacto a los logits del modelo.
+fn injectar_bias(tabla: &Recall, ds: &TextDataset, wi: usize, seq: usize, vocab: usize, beta: f32) -> Tensor {
+    let mut data = vec![0.0f32; seq * vocab];
+    for t in 0..seq {
+        let pos_global = wi * seq + t + 1;
+        let desde = pos_global.saturating_sub(8);
+        let ctx = &ds.ids[desde..pos_global];
+        if ctx.is_empty() {
+            continue;
+        }
+        let Some((q, _count)) = tabla.lookup_detail(ctx, vocab) else { continue };
+        let h = shannon_bits(&q);
+        let gate = (1.0 - h / GATE_H_HIGH).clamp(0.0, 1.0);
+        if gate == 0.0 {
+            continue;
+        }
+        let lambda = beta * gate;
+        let row = &mut data[t * vocab..(t + 1) * vocab];
+        for (k, &qi) in q.iter().enumerate() {
+            row[k] = lambda * (qi + GATE_EPS).ln().max(-GATE_CAP);
+        }
+    }
+    Tensor::new(data, vec![seq, vocab])
+}
 
 pub struct TrainConfig {
     pub data_path: String,
@@ -29,6 +86,10 @@ pub struct TrainConfig {
     /// `--persist`: sin esto se compararían dos cambios a la vez, el orden y
     /// la memoria, y no se sabría cuál produjo la diferencia.
     pub inorder: bool,
+    /// β del regularizador de tabla (0.0 = apagado, entrenamiento normal,
+    /// idéntico a antes de esta receta). Gate por determinismo de la tabla,
+    /// no por confianza del modelo -- ver comentario junto a `injectar_bias`.
+    pub gate_beta: f32,
 }
 
 pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
@@ -88,6 +149,18 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
     }
     println!("eva: {n_train} ventanas para entrenar, {n_val} para validar");
 
+    // Tabla congelada, construida SOLO sobre train -- misma disciplina que
+    // los scripts de eval de hoy. None si el regularizador está apagado
+    // (β=0.0): cero costo extra, entrenamiento idéntico al de siempre.
+    let tabla: Option<Recall> = if tcfg.gate_beta > 0.0 {
+        let bytes_train: Vec<usize> = ds.ids[..n_train * mcfg.seq_len].to_vec();
+        let t = Recall::build(&bytes_train);
+        println!("eva: regularizador de tabla ACTIVO, β={:.2}, H_HIGH={GATE_H_HIGH:.1} (gate por determinismo, no confianza)", tcfg.gate_beta);
+        Some(t)
+    } else {
+        None
+    };
+
     let total_steps = n_train * tcfg.epochs;
     let mut step = 0usize;
     let mut running = 0.0f32;
@@ -125,6 +198,16 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
                         model.forward_carrying(&input, &mut estados)
                     } else {
                         model.forward(&input)
+                    };
+                    // El sesgo es constante (sin grafo): `add` sólo necesita
+                    // grad de `logits`, que sí lo tiene. Nada nuevo que
+                    // gradcheckear -- son dos ops existentes compuestas.
+                    let logits = match &tabla {
+                        Some(t) => crate::tensor::ops::add(
+                            &logits,
+                            &injectar_bias(t, &ds, wi, mcfg.seq_len, mcfg.vocab, tcfg.gate_beta),
+                        ),
+                        None => logits,
                     };
                     let loss = crate::tensor::ops::cross_entropy(&logits, &target);
                     let v = loss.data[0];

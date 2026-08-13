@@ -13,6 +13,14 @@
 //! decil de p[argmax] × banda de count del contexto (miss / c=2 / 3-9 /
 //! 10-49 / 50+). NO toca `src/`: sólo `forward_hidden`, `classify_row`,
 //! `Recall::lookup_detail`, todo público, cero op nueva.
+//!
+//! Extensión (tarea de Dante, "entropía-por-count"): teoría de Claudio para
+//! explicar la reversión de arriba con una sola causa -- count alto podría
+//! no significar "contexto común y confiable" sino "contexto de baja
+//! información" (fragmento genérico con más continuaciones válidas). Se
+//! mide directo: H(q) de Shannon sobre la distribución que ya devuelve
+//! `lookup_detail` (re-agregación, no op nueva), por banda de count. El
+//! número que la mata: si H no crece con el count, la teoría cae acá.
 
 use eva_llm_v0::bet::classify_row;
 use eva_llm_v0::data::TextDataset;
@@ -25,6 +33,15 @@ struct Pos {
     p_argmax: f32,
     correcto: bool,
     banda: &'static str,
+    /// H(q) en bits sobre la distribución de continuaciones de la tabla en
+    /// esta posición. None si no hubo hit (banda "miss": no hay q).
+    entropia: Option<f32>,
+}
+
+/// Entropía de Shannon en bits (log2), 0*log2(0) := 0 por convención.
+fn shannon_bits(q: &[f32]) -> f32 {
+    let nats: f32 = q.iter().filter(|&&p| p > 0.0).map(|&p| -p * p.ln()).sum();
+    nats / std::f32::consts::LN_2
 }
 
 const BANDAS: [&str; 5] = ["miss", "c=2", "3-9", "10-49", "50+"];
@@ -60,9 +77,10 @@ fn recolectar(
             let desde = pos_global.saturating_sub(8);
             let ctx = &ds.ids[desde..pos_global];
             let hit = if ctx.is_empty() { None } else { tabla.lookup_detail(ctx, vocab) };
+            let entropia = hit.as_ref().map(|(q, _)| shannon_bits(q));
             let banda = banda_count(hit);
 
-            out.push(Pos { p_argmax, correcto, banda });
+            out.push(Pos { p_argmax, correcto, banda, entropia });
         }
     }
     out
@@ -150,6 +168,57 @@ fn numero_que_mata(nombre: &str, posiciones: &[Pos]) {
     }
 }
 
+/// La teoría de Claudio, medida directo: H(q) media por banda de count.
+/// Si crece con el count, "count alto" es contexto de baja información
+/// (más continuaciones válidas), lo cual explicaría por qué la vara de la
+/// tabla y la precisión del modelo bajan las dos con count alto. Si no
+/// crece, la teoría cae acá.
+fn entropia_por_banda(nombre: &str, posiciones: &[Pos]) {
+    let vocab_bits = 8.0f32; // techo teórico: log2(256)
+    println!("\n=== {nombre}: H(q) de Shannon (bits) por banda de count, techo={vocab_bits} bits ===");
+    let mut medias = Vec::new();
+    for b in ["c=2", "3-9", "10-49", "50+"] {
+        let vals: Vec<f32> = posiciones.iter()
+            .filter(|p| p.banda == b)
+            .filter_map(|p| p.entropia)
+            .collect();
+        if vals.is_empty() {
+            println!("  banda {b:<6}  sin datos");
+            continue;
+        }
+        let n = vals.len();
+        let media = vals.iter().sum::<f32>() / n as f32;
+        let mut orden = vals.clone();
+        orden.sort_by(|a, c| a.partial_cmp(c).unwrap());
+        let mediana = orden[n / 2];
+        println!("  banda {b:<6}  H media {media:.3} bits  |  H mediana {mediana:.3}  |  n={n}");
+        medias.push((b, media));
+    }
+
+    println!("\n=== {nombre}: EL NÚMERO -- ¿crece H con el count? ===");
+    if let (Some(&(_, h_raro)), Some(&(_, h_comun))) =
+        (medias.iter().find(|(b, _)| *b == "c=2"), medias.iter().find(|(b, _)| *b == "50+"))
+    {
+        let delta = h_comun - h_raro;
+        println!("  Δ H (50+ menos c=2): {delta:+.3} bits");
+        let monotona = medias.windows(2).all(|w| w[1].1 >= w[0].1 - 0.02);
+        println!("  monótona no-decreciente c=2→3-9→10-49→50+: {monotona}");
+        if delta > 0.1 && monotona {
+            println!("  H crece con el count, monótona -- confirma la teoría: count alto es");
+            println!("  contexto de baja información (más continuaciones válidas), explica las");
+            println!("  dos anomalías (vara de tabla y precisión del modelo bajando con count).");
+        } else if delta > 0.1 {
+            println!("  H crece de punta a punta pero NO monótona -- señal parcial, no la teoría");
+            println!("  limpia. Anotar, no cerrar como confirmada.");
+        } else {
+            println!("  H NO crece claramente con el count -- la teoría CAE acá. La reversión de");
+            println!("  \"confiado y errado\" queda sin explicación, hay que buscar otra causa.");
+        }
+    } else {
+        println!("  Falta alguna banda para calcular el delta.");
+    }
+}
+
 fn main() {
     let weights = std::env::args().nth(1).unwrap_or_else(|| "16m5b_seed7.weights".into());
     let data = std::env::args().nth(2).unwrap_or_else(|| "data/prosa250.txt".into());
@@ -174,8 +243,10 @@ fn main() {
     let pos_dev = recolectar(&model, &ds, &tabla, &ventanas_dev, seq);
     imprimir_tabla("DEV (mirar, no decide)", &pos_dev);
     numero_que_mata("DEV", &pos_dev);
+    entropia_por_banda("DEV (mirar, no decide)", &pos_dev);
 
     let pos_val = recolectar(&model, &ds, &tabla, &ventanas_val, seq);
     imprimir_tabla("VAL (tocada una sola vez)", &pos_val);
     numero_que_mata("VAL", &pos_val);
+    entropia_por_banda("VAL (tocada una sola vez)", &pos_val);
 }

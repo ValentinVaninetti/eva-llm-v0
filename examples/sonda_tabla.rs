@@ -10,6 +10,7 @@
 //! NO toca `src/`: todo lo que usa ya es público (`forward_hidden`,
 //! `Recall::lookup_detail`, `ops::stake_loss` con span_len=1, `StakeHead`).
 
+use eva_llm_v0::bet::classify_row;
 use eva_llm_v0::data::TextDataset;
 use eva_llm_v0::recall::Recall;
 use eva_llm_v0::rng::Rng;
@@ -24,6 +25,9 @@ struct Ejemplo {
     hidden: Vec<f32>,
     correcto: f32,
     count: u32,
+    /// p[argmax] que el modelo YA declara gratis (`bet::classify_row`) --
+    /// la vara a batir. Si esto sólo redescubre esto, no agrega nada nuevo.
+    conf_modelo: f32,
 }
 
 fn recolectar(
@@ -37,7 +41,8 @@ fn recolectar(
     let mut out = Vec::new();
     for &wi in ventanas {
         let (input, target) = ds.window(wi);
-        let (_, hidden) = model.forward_hidden(&input);
+        let (logits, hidden) = model.forward_hidden(&input);
+        let vocab = model.cfg.vocab;
         for t in 0..input.len() {
             // Mismo indexado que el Paso 0, ya corregido una vez ahí.
             let pos_global = wi * seq + t + 1;
@@ -54,10 +59,12 @@ fn recolectar(
                 .fold((0usize, f32::NEG_INFINITY), |(bi, bv), (i, &v)| if v > bv { (i, v) } else { (bi, bv) })
                 .0;
             let correcto = (argmax == target[t]) as u8 as f32;
+            let (conf_modelo, _, _, _) = classify_row(&logits.data[t * vocab..(t + 1) * vocab], target[t]);
             out.push(Ejemplo {
                 hidden: hidden.data[t * dim..(t + 1) * dim].to_vec(),
                 correcto,
                 count,
+                conf_modelo,
             });
         }
     }
@@ -178,7 +185,27 @@ fn main() {
         }
     }
 
+    // Riesgo que dejé anotado en mi propia propuesta: que la cabecita sólo
+    // redescubra algo ya gratis (la confianza que el modelo YA declara,
+    // bet::classify_row) en vez de aprender algo nuevo sobre la tabla.
+    let pool_conf: Vec<(f64, bool)> = ejemplos_eval.iter()
+        .map(|e| (e.conf_modelo as f64, e.correcto > 0.5))
+        .collect();
+    let auroc_conf_libre = auroc(&pool_conf);
+
     let global = auroc(&pool);
+    println!("\n=== CONTROL: ¿esto es nuevo, o es la confianza gratis del modelo? ===");
+    println!("  AUROC de p[argmax] SOLO (bet::classify_row, cero parámetros nuevos): {auroc_conf_libre:.3}");
+    println!("  AUROC de la cabecita entrenada:                                      {global:.3}");
+    if global > auroc_conf_libre + 0.03 {
+        println!("  La cabecita le gana a la confianza gratis -- aprendió algo que p[argmax]");
+        println!("  no tenía. Vale la pena como mecanismo, no es sólo redescubrir lo gratis.");
+    } else {
+        println!("  La cabecita NO le gana a p[argmax] solo -- lo que mide ya estaba gratis en");
+        println!("  la confianza que el modelo declara. No hace falta entrenar nada nuevo: usar");
+        println!("  p[argmax] directo como el gate, sin gastar dim+1 parámetros extra.");
+    }
+
     println!("\n=== VEREDICTO ===");
     if global < 0.55 {
         println!("  AUROC pooled {global:.3} -- azar contra la vara (~{:.0}%). El modelo NO sabe", 100.0*vara_global);

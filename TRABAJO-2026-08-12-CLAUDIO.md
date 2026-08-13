@@ -174,3 +174,71 @@ antes de invertir otra corrida de GPU.
 Fuentes: [Generalization through Memorization: Nearest Neighbor Language
 Models](https://www.alphaxiv.org/overview/1911.00172) · [Nearest Neighbor
 Language Models (OpenReview)](https://openreview.net/pdf?id=HklBjCEKvH)
+
+---
+
+## Paso 1 corrido: la señal está, pero no hacía falta construir nada para tenerla
+
+La lib volvió a compilar, corrí `examples/sonda_tabla.rs` completo. Primera
+vez en todo el proyecto que una sonda "antes del hecho" encuentra algo real
+-- y el resultado completo cambia la recomendación, no sólo la confirma.
+
+### El número principal
+
+Cabecita `g=sigmoid(w·h+b)` (misma forma que `StakeHead`, span_len=1),
+DETACHED, entrenada 60 pasos full-batch sobre la mitad de las ventanas de
+validación (12.316 ejemplos con hit de tabla), evaluada en la otra mitad
+nunca vista (12.491 ejemplos):
+
+```
+vara (aciertos de la tabla en eval): 55.0%
+AUROC pooled: 0.742  (n=12491)
+
+banda      n       vara       AUROC
+2-4        3896    56.9%    0.745
+5-9        2446    55.1%    0.756
+10-49      4480    56.5%    0.735
+50+        1669    46.5%    0.730
+```
+
+**0.742 supera holgado el umbral que mata (0.55) y el que confirma (0.6),
+consistente en las cuatro bandas de count.** Por primera vez en este
+proyecto, el estado oculto SÍ anticipa algo -- no "voy a acertar yo" (eso
+falló tres veces: stake antes-de-gastar, magnitud, congelamiento), pero sí
+"este contexto es de los que la tabla domina". Mi hipótesis del diseño
+original se sostiene.
+
+### El control que cambia la recomendación
+
+Agregué lo que yo mismo había marcado como riesgo en la propuesta original:
+¿esto es señal nueva, o la cabecita sólo redescubre la confianza que el
+modelo YA declara gratis (`p[argmax]`, cero parámetros, ya calculado en
+cada forward)?
+
+```
+AUROC de p[argmax] SOLO (bet::classify_row, cero parámetros nuevos): 0.797
+AUROC de la cabecita entrenada:                                      0.742
+```
+
+**`p[argmax]` solo le GANA a la cabecita entrenada.** No es un empate que
+justifique construir igual -- es peor, y no cuesta nada.
+
+### Veredicto real, más preciso que "AUROC > 0.6"
+
+- **La hipótesis subyacente está confirmada:** el estado / la salida del
+  modelo SÍ anticipan si la tabla tiene razón, antes de generar. Es la
+  primera señal "antes del hecho" que sobrevive en todo el proyecto.
+- **El mecanismo que propuse (cabecita entrenada, `dim+1` parámetros) NO
+  hace falta.** Lo que iba a aprender ya está, gratis, en `p[argmax]` --
+  que además es EXACTAMENTE la misma vara post-hoc del punto 8 (media
+  p[argmax] ≈0.67 a nivel de tramo) aplicada ahora a nivel de token. No es
+  una señal nueva -- es la misma vara de siempre, mostrando que también
+  sirve para esto.
+- **Recomendación concreta:** si se quiere un gate "¿confío en la tabla
+  acá?", usar `p[argmax]` directo como umbral. Cero entrenamiento, cero
+  parámetros nuevos, cero riesgo de interferir con la CE (ni siquiera hay
+  CE de por medio). No construir la cabecita.
+
+Esto no mata la línea -- la vuelve más barata de lo que yo mismo la había
+diseñado. Código en `examples/sonda_tabla.rs`, corrida real sobre
+`16m5b_seed7.weights`, sin tocar `src/`.

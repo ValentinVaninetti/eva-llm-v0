@@ -2634,3 +2634,47 @@ pegada. La GPU (GTX 1650) nunca pasó de 52°C, donde fue a parar el matmul
 grande con `EVA_GPU=1`. El log del entrenamiento quedó en el scratchpad de
 esta sesión; el checkpoint `16m5b_seed7.weights` (53 MB, sin trackear a
 propósito) quedó en la raíz del repo.
+
+### LA CURVA DE ESCALA, MEDIDA POR OPENCODE — la ventaja de la tabla se mantiene a 16M
+
+Con GPT out y siguiendo la prioridad que señaló Claudio/Valentín: corrí
+`eva recall` sobre los checkpoints de escala que ya estaban entrenados en
+`/tmp` (sin entrenar nada nuevo, sólo evaluar) para contestar la pregunta
+que abre este documento y que quedó tapada por el desvío del cómputo por
+influencia: **¿la ventaja de la tabla de k-gramas se mantiene o se cierra
+al crecer el modelo?**
+
+Los checkpoints, con el mismo corpus y corte contiguo:
+
+    modelo             params    solo (bpb)   + tabla (bpb)   mejora
+    2.7M / 4 bloques   2.77M       2.632          2.467       6.3%
+    16M / 6 bloq seed7 16.03M      2.598          2.443       6.0%
+    16M / 6 bloq seed8 16.03M      2.610          2.454       6.0%
+
+**La ventaja se mantiene: 6.0% a 16M contra 6.3% a 2.7M, con 6x los
+parámetros.** No se cerró. La tabla no sólo suplía lo que el modelo chico
+todavía no podía memorizar: aporta lo mismo relativo a un modelo seis veces
+más grande. El patrón de aciertos es idéntico en los tres (8:24% 6:25%
+4:34% 3:12% 2:5%) y la cobertura 98.9% -- la tabla toca las mismas
+posiciones y gana lo mismo relativo en las dos escalas.
+
+Dos salvedades de metodología, para que la auditoría las pese:
+
+1. **Split:** `eva recall` espera un modelo entrenado con `--val 0.2`
+   (80/10/10: dev y val no vistos). Estos checkpoints se entrenaron con
+   `--val 0.1` (90/10): la validación reportada (últimas 391 ventanas) es
+   texto que el modelo nunca vio y es limpia, pero el lambda se eligió
+   sobre la franja dev (80-90%) que el modelo SÍ vio durante su
+   entrenamiento. El sesgo de eso juega EN CONTRA de la tabla (un modelo
+   que conoce el dev tira el lambda hacia confiar más en él), así que si la
+   mejora apareció igual, la conclusión se sostiene -- pero el par limpio
+   (modelos 16M entrenados con val 0.2) quedaría como control si se quiere
+   el número sin esa sombra.
+2. **1 época y 1 corpus:** lo mismo de siempre; la curva original pedía
+   15M/60M con la máquina nueva y esto es el escalón de 16M, no la curva
+   completa.
+
+**Lo que esto decide:** el resultado bueno del proyecto no era un artefacto
+del tamaño chico. La tabla + modelo chico le gana al modelo entero en las
+dos escalas que pudimos medir, y por la misma cantidad relativa. Los puntos
+5 y 7 (el cuaderno adentro, el borrado dirigido) conservan su fundamento.

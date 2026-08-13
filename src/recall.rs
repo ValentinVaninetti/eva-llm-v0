@@ -146,6 +146,33 @@ impl Recall {
         None
     }
 
+    /// Suma UNA observación de uso, con la misma disciplina de conteo que
+    /// `build()`: no reemplaza nada, no marca "ésta es LA respuesta" -- es
+    /// un voto más para `byte_real` en el contexto dado, en TODOS los
+    /// órdenes que ese contexto alcanza a llenar (igual que una posición de
+    /// entrenamiento real habría hecho). Si el contexto es ambiguo, es un
+    /// voto honesto entre varios; si el hecho se repite, `MIN_COUNT` y la
+    /// distribución lo consolidan solos -- el maestro que remarca, no el
+    /// que grita.
+    ///
+    /// Precedente: caché en línea de kNN-LM/modelos de caché (Grave et al.,
+    /// "Improving Neural Language Models with a Continuous Cache") -- una
+    /// memoria externa que se extiende con lo que se va viendo, sin tocar
+    /// los pesos.
+    pub fn observe(&mut self, ctx: &[usize], byte_real: u8) {
+        for (ti, &k) in ORDERS.iter().enumerate() {
+            if ctx.len() < k {
+                continue;
+            }
+            let key = pack(&ctx[ctx.len() - k..]);
+            let e = self.tables[ti].entry(key).or_default();
+            match e.iter_mut().find(|(b, _)| *b == byte_real) {
+                Some((_, c)) => *c += 1,
+                None => e.push((byte_real, 1)),
+            }
+        }
+    }
+
     /// Cuántas entradas tiene, para poder contar lo que "pesa" la tabla contra
     /// lo que pesan los parámetros que reemplaza.
     pub fn entries(&self) -> usize {
@@ -254,6 +281,21 @@ mod tests {
         let r = Recall::build(&train);
         let ctx: Vec<usize> = "qwertyui".bytes().map(|b| b as usize).collect();
         assert!(r.lookup(&ctx, 256).is_none(), "le creyó a una sola aparición");
+    }
+
+    #[test]
+    fn observe_is_a_vote_not_a_flag() {
+        // Un solo `observe` no alcanza -- sigue mudo, misma disciplina que
+        // MIN_COUNT en build(). Recién con el segundo voto contesta.
+        let train: Vec<usize> = "xyzxyzxyzxyz".bytes().map(|b| b as usize).collect();
+        let mut r = Recall::build(&train);
+        let ctx: Vec<usize> = "qqqqqqqq".bytes().map(|b| b as usize).collect();
+        assert!(r.lookup(&ctx, 256).is_none(), "no debería saber nada de este contexto todavía");
+        r.observe(&ctx, b'!');
+        assert!(r.lookup(&ctx, 256).is_none(), "un solo voto no es MIN_COUNT, sigue en silencio");
+        r.observe(&ctx, b'!');
+        let p = r.lookup(&ctx, 256).expect("con 2 votos ya debería contestar");
+        assert!(p['!' as usize] > 0.9, "esperaba '!' y dio {:?}", p['!' as usize]);
     }
 
     #[test]

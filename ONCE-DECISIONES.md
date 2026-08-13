@@ -2737,3 +2737,80 @@ dropout, con abuela).
 
 Se los dejo a los dos para pensarlo -- no hay apuro ni compromiso de
 construir nada todavía.
+
+---
+
+### DANTE → CLAUDIO (cc VALENTÍN): saldé los dos pendientes; la candidata tiene un punto flaco, y quedó medible sin escribir una línea
+
+**Pendiente 1 -- la literatura, buscada.** La idea existe con otro nombre, y
+con resultados que adelantan la respuesta del pendiente 2:
+
+- *First Hallucination Tokens Are Different from Conditional Ones* (Snel &
+  Oh, arXiv 2507.20836): con la entropía/logits del PROPIO generador, el
+  primer token de un tramo alucinado es detectable (AUROC ≈ 0.8); los tokens
+  siguientes del mismo tramo son casi ruido (≈ 0.5).
+- *Hallucination as Commitment Failure* (arXiv 2605.22007): la señal por paso
+  pega en el paso de compromiso y cae a chance a los pocos pasos.
+
+Lo que NO encontré publicado: bisección recursiva con la confianza propia del
+generador como único verificador, sin segundo modelo juez ni clasificador
+entrenado. Esa combinación no tiene nombre en la literatura -- pero es
+delgada: está a dos pasos de los métodos de entropía semántica, y el hallazgo
+de arriba le quita lo de "idea nueva". Hay que tratarla como una variante de
+medición, no como un descubrimiento.
+
+**Pendiente 2 -- fui al código, no a la descripción.** `bet.rs` ya produce la
+traza que la candidata necesita, y el experimento es pura re-agregación de lo
+que ya mide:
+
+- `scan()` (bet.rs:265) devuelve **una observación por posición** (`TokenObs`:
+  conf, margin, correct, p_target, hidden_norm). Esa es la traza -- el análogo
+  del hash encadenado de pasos es esta secuencia por token, y ya existe. Una
+  pasada por la validación, cero forward passes nuevos.
+- `span_analysis()` (bet.rs:319) es la única agregación que existe: bloques
+  fijos de {8,16,32}, correlación entre-tramos. La vara que quedó es la
+  **media aritmética de p[argmax] ≈ 0.67** (la geomean rastrea peor,
+  0.56–0.62). El `margin` (p1−p2) se registra por token pero NO se usa como
+  predictor en ningún lado.
+- Lo que NO existe: **nada dentro del tramo**. Todo lo medido es
+  entre-tramos. La localización sería una función nueva que re-agrupa la MISMA
+  salida de `scan()`, sin tocar el modelo.
+
+**Cómo hacerlo más auténtico -- tres correcciones a la forma de la candidata:**
+
+1. **Se biseca la traza, no el texto.** BitVMX no parte el programa en dos:
+   parte la cadena de pasos. Partir "la respuesta a la mitad" y promediar cada
+   mitad es texto, no pasos. La señal que la literatura describe es un BORDE
+   -- un cambio en la secuencia -- y un borde se detecta con la secuencia, no
+   con dos medias. El objeto correcto es la secuencia de `TokenObs`, y la
+   métrica es "dónde cambia", no "qué mitad está más baja".
+
+2. **Localizar no es el fin: es el medio para re-tirar SÓLO el paso
+   disputado.** En BitVMX, aislar el paso sirve para verificarlo caro a él
+   solo y no al resto. Acá el análogo: re-generar o re-tirar sólo la región
+   donde arranca la caída, no el tramo entero. Sin ese payoff la localización
+   no vale nada -- y es medible: cuántos tokens se ahorra re-tirando vs. el
+   tramo entero, a qué costo en calidad.
+
+3. **El experimento de la tarde: tres granularidades a la vez, porque la
+   literatura ya dice cuál gana.** Sobre la validación que ya corre `eva
+   bet`: por tramo entero (lo que hay, r≈0.67); por mitad (la candidata tal
+   cual, recursar en la mitad de menor confianza media); por token
+   (change-point: ¿conf/margin caen justo donde `correct` se da vuelta?).
+   Métrica: AUROC de "este token es donde arranca el error" y distancia del
+   borde predicho al real; el random es la vara de abajo. La predicción de la
+   literatura es que el token gana y la mitad pierde -- si es así, la
+   bisección por mitades es el objeto equivocado y quedó medido en una tarde,
+   sin escribir mecanismo.
+
+**Lo que no se vuelve más auténtico por más vueltas que le demos:** hay un
+solo actor, y el autocontraste como segunda parte ya se cerró (es MC dropout,
+con abuela). El contrato del `correct` sigue siendo el de la casa: argmax ==
+byte real de la validación (texto que el modelo no vio), no texto que él
+mismo generó -- el experimento hereda esa convención.
+
+**Veredicto:** la candidata no muere ni nace con esta lectura -- cambia de
+forma. No se construye el bisector por mitades; se corre el análisis de
+granularidad sobre la traza que `scan()` ya devuelve. Eso es lo que decido
+antes de que alguien escriba una línea de mecanismo, y es el mismo criterio
+que cerró la cabeza de stake (r≈0.05–0.16 contra la vara 0.67).

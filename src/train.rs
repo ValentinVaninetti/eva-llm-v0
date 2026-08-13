@@ -90,6 +90,14 @@ pub struct TrainConfig {
     /// idéntico a antes de esta receta). Gate por determinismo de la tabla,
     /// no por confianza del modelo -- ver comentario junto a `injectar_bias`.
     pub gate_beta: f32,
+    /// Ronda 4, hipótesis de GPT ("supervivencia"): probabilidad de que CADA
+    /// bloque se saltee, independiente, en cada paso (0.0 = apagado,
+    /// idéntico a antes). Reusa `forward_skips` (ya público, el mismo que
+    /// usa `techo`) -- es Stochastic Depth (Huang et al. 2016) a nivel de
+    /// bloque, sin sesgo hacia ningún bloque en particular a propósito: la
+    /// pregunta es si la red redistribuye dependencia sola, no si la
+    /// forzamos a hacerlo.
+    pub destroy_p: f32,
 }
 
 pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
@@ -196,6 +204,11 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
                 let (loss_v, grads) = {
                     let logits = if tcfg.persist {
                         model.forward_carrying(&input, &mut estados)
+                    } else if tcfg.destroy_p > 0.0 {
+                        let skips: Vec<usize> = (0..model.blocks.len())
+                            .filter(|_| rng.next_f32() < tcfg.destroy_p)
+                            .collect();
+                        model.forward_skips(&input, &skips).0
                     } else {
                         model.forward(&input)
                     };

@@ -56,6 +56,17 @@ fn pack(ctx: &[usize]) -> u64 {
     ctx.iter().fold(0u64, |acc, &b| (acc << 8) | (b as u64 & 0xff))
 }
 
+/// Normaliza las continuaciones de un contexto a una distribución.
+fn distribution(hits: &[(u8, u32)], vocab: usize) -> Vec<f32> {
+    let total: u32 = hits.iter().map(|(_, c)| *c).sum();
+    let mut p = vec![0.0f32; vocab];
+    let inv = 1.0 / total as f32;
+    for &(b, c) in hits {
+        p[b as usize] = c as f32 * inv;
+    }
+    p
+}
+
 impl Recall {
     /// Construye la tabla **sólo con los bytes de entrenamiento**. Que acá
     /// entre un byte de validación invalida todo el experimento.
@@ -101,6 +112,24 @@ impl Recall {
     /// bytes, después 6, y así. Contexto más largo es más específico y más
     /// confiable; el retroceso es lo que evita quedarse mudo casi siempre.
     pub fn lookup(&self, ctx: &[usize], vocab: usize) -> Option<Vec<f32>> {
+        let hits = self.find(ctx)?;
+        Some(distribution(hits, vocab))
+    }
+
+    /// Igual que `lookup`, pero además expone CUÁNTAS veces se vio el contexto
+    /// que contestó (`total`). Es la variable que `lookup` descarta: un
+    /// contexto visto 2 veces y uno visto 500 devuelven la misma distribución
+    /// (certeza 1.0) y el caller no puede distinguirlos. Para un λ por count
+    /// hace falta el count, y acá sale.
+    pub fn lookup_detail(&self, ctx: &[usize], vocab: usize) -> Option<(Vec<f32>, u32)> {
+        let hits = self.find(ctx)?;
+        let total: u32 = hits.iter().map(|(_, c)| *c).sum();
+        Some((distribution(hits, vocab), total))
+    }
+
+    /// El contexto que contesta: baja de orden hasta encontrar uno con
+    /// suficientes apariciones, y cuenta el acierto en `hits` para el perfil.
+    fn find(&self, ctx: &[usize]) -> Option<&Vec<(u8, u32)>> {
         for (ti, &k) in ORDERS.iter().enumerate() {
             if k < self.min_order || ctx.len() < k {
                 continue;
@@ -112,12 +141,7 @@ impl Recall {
                 continue;
             }
             self.hits.borrow_mut()[ti] += 1;
-            let mut p = vec![0.0f32; vocab];
-            let inv = 1.0 / total as f32;
-            for &(b, c) in hits {
-                p[b as usize] = c as f32 * inv;
-            }
-            return Some(p);
+            return Some(hits);
         }
         None
     }

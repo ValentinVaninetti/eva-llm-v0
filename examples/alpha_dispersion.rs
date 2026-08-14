@@ -28,8 +28,13 @@ fn main() {
             println!("bloque {bi}: no es ClockMem (arch distinta), salteado");
             continue;
         };
-        // alpha = sigmoid(log_clock), igual que en forward().
-        let alphas: Vec<f32> = clock.log_clock.data.iter().map(|&lc| 1.0 / (1.0 + (-lc).exp())).collect();
+        // alpha = squash(log_clock), igual que en forward() -- respeta
+        // EVA_ALPHA_ANTISAT porque el checkpoint pudo entrenarse con
+        // algebraic_sigmoid en vez de sigmoid (Ronda 4, hipótesis de GPT).
+        let antisat = std::env::var("EVA_ALPHA_ANTISAT").is_ok();
+        let alphas: Vec<f32> = clock.log_clock.data.iter().map(|&lc| {
+            if antisat { 0.5 * (1.0 + lc / (1.0 + lc * lc).sqrt()) } else { 1.0 / (1.0 + (-lc).exp()) }
+        }).collect();
         let mut ordenado = alphas.clone();
         ordenado.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let n = ordenado.len();

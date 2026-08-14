@@ -24,8 +24,16 @@ use eva_llm_v0::tensor::autograd::backward;
 use eva_llm_v0::tensor::ops;
 use std::io::Write;
 
-fn sigmoid(x: f32) -> f32 { 1.0 / (1.0 + (-x).exp()) }
-fn logit(p: f32) -> f32 { (p / (1.0 - p)).ln() }
+// Respeta EVA_ALPHA_ANTISAT: el checkpoint pudo entrenarse con
+// algebraic_sigmoid (Ronda 4) en vez de sigmoid -- mismas fórmulas que
+// clock.rs (privadas ahí, duplicadas acá igual que en otros scripts de hoy).
+fn antisat() -> bool { std::env::var("EVA_ALPHA_ANTISAT").is_ok() }
+fn sigmoid(x: f32) -> f32 {
+    if antisat() { 0.5 * (1.0 + x / (1.0 + x * x).sqrt()) } else { 1.0 / (1.0 + (-x).exp()) }
+}
+fn logit(p: f32) -> f32 {
+    if antisat() { (2.0 * p - 1.0) / (2.0 * (p * (1.0 - p)).sqrt()) } else { (p / (1.0 - p)).ln() }
+}
 
 fn bpb_total(model: &eva_llm_v0::model::EvaModel, ds: &TextDataset, from: usize, to: usize) -> f32 {
     let mut nats = 0.0f64;

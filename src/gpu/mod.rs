@@ -86,12 +86,13 @@ impl Cache {
     }
 }
 
-/// Reloj de las tres fases de un `matmul`, activo sólo con `EVA_GPU_PROFILE=1`.
+/// Timer for the three phases of a `matmul`, active only with
+/// `EVA_GPU_PROFILE=1`.
 ///
-/// Existe porque el tiling en registros dio 1.13x y no el 2-4x que predecía la
-/// cuenta de lecturas de LDS: si el kernel fuera el cuello, esa cuenta habría
-/// dado. Sin partir el tiempo en subir / calcular / bajar, la siguiente
-/// optimización se elige tirando la moneda.
+/// Exists because register tiling gave 1.13x and not the 2-4x that the LDS
+/// read count predicted: if the kernel were the bottleneck, that count would
+/// have paid off. Without splitting the time into upload / compute /
+/// download, the next optimization gets picked by flipping a coin.
 struct Watch(Option<std::time::Instant>);
 
 impl Watch {
@@ -101,7 +102,7 @@ impl Watch {
         Watch(on.then(std::time::Instant::now))
     }
 
-    /// Tiempo desde el corte anterior, y reinicia.
+    /// Time since the previous checkpoint, and resets it.
     fn lap(&self) -> std::time::Duration {
         self.0.map(|t| t.elapsed()).unwrap_or_default()
     }
@@ -111,20 +112,20 @@ impl Watch {
         m: usize,
         k: usize,
         n: usize,
-        subida: std::time::Duration,
-        hasta_cola: std::time::Duration,
+        upload: std::time::Duration,
+        until_queue: std::time::Duration,
     ) {
         let Some(t0) = self.0 else { return };
         let total = t0.elapsed();
         let ms = |d: std::time::Duration| d.as_secs_f64() * 1e3;
-        // `lap` mide desde el arranque, así que las fases son diferencias.
-        let cola = hasta_cola.saturating_sub(subida);
-        let bajada = total.saturating_sub(hasta_cola);
+        // `lap` measures from the start, so the phases are differences.
+        let queue = until_queue.saturating_sub(upload);
+        let download = total.saturating_sub(until_queue);
         eprintln!(
-            "[gpu {m}x{k}x{n}] subir {:.3} | cola+cálculo {:.3} | bajar {:.3} | total {:.3} ms",
-            ms(subida),
-            ms(cola),
-            ms(bajada),
+            "[gpu {m}x{k}x{n}] upload {:.3} | queue+compute {:.3} | download {:.3} | total {:.3} ms",
+            ms(upload),
+            ms(queue),
+            ms(download),
             ms(total),
         );
     }
@@ -161,7 +162,7 @@ impl Gpu {
                 "vkEnumeratePhysicalDevices",
             )?;
             if count == 0 {
-                return Err("no hay ninguna GPU Vulkan en este sistema".to_string());
+                return Err("no Vulkan GPU found on this system".to_string());
             }
             let mut devices = vec![ptr::null_mut(); count as usize];
             check(
@@ -173,7 +174,7 @@ impl Gpu {
             let mut best_queue = 0u32;
             for &pd in &devices {
                 let props = physical_props(pd);
-                let qfam = queue_family(pd).ok_or_else(|| "sin cola de cómputo".to_string())?;
+                let qfam = queue_family(pd).ok_or_else(|| "no compute queue".to_string())?;
                 let score = match props.device_type {
                     PHYSICAL_DEVICE_TYPE_DISCRETE_GPU => 2,
                     PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU => 1,
@@ -184,7 +185,7 @@ impl Gpu {
                     best_queue = qfam;
                 }
             }
-            let (physical, _) = best.ok_or("no se encontró GPU con cola de cómputo")?;
+            let (physical, _) = best.ok_or("no GPU with a compute queue found")?;
             let props = physical_props(physical);
 
             let mut mem_props = VkPhysicalDeviceMemoryProperties {
@@ -294,11 +295,11 @@ impl Gpu {
         Ok(out)
     }
 
-    /// Igual, escribiendo en un buffer que ya existe.
+    /// Same thing, writing into a buffer that already exists.
     ///
-    /// `math::matmul` ya tiene su `out`: devolverle un `Vec` nuevo era pedir
-    /// una allocation y una copia de más por llamada, justo en el camino que
-    /// se optimizó para no tener ninguna.
+    /// `math::matmul` already has its `out`: handing it back a new `Vec`
+    /// meant asking for one extra allocation and one extra copy per call,
+    /// on exactly the path that was optimized to have none.
     pub fn matmul_into(
         &self,
         a: &[f32],
@@ -308,7 +309,7 @@ impl Gpu {
         n: usize,
         out: &mut [f32],
     ) -> Result<(), String> {
-        assert_eq!(out.len(), m * n, "el destino no tiene el tamaño de C");
+        assert_eq!(out.len(), m * n, "the destination doesn't have C's size");
         let mut cache = self.cache.borrow_mut();
         // `|` and not `||`: every slot must be checked, not short-circuited on
         // the first one that already fit.
@@ -329,7 +330,7 @@ impl Gpu {
         let t = Watch::start();
         self.write(sa, a);
         self.write(sb, b);
-        let subida = t.lap();
+        let upload = t.lap();
         let ds = self.ds;
 
         self.record(|cb| {
@@ -371,9 +372,10 @@ impl Gpu {
                 );
                 let params = [m as u32, k as u32, n as u32];
                 vkCmdPushConstants(cb, self.pipeline_layout, SHADER_STAGE_COMPUTE_BIT, 0, 12, params.as_ptr().cast());
-                // Un grupo cubre 64x64 de C (16x16 hilos, 4x4 cada uno), no
-                // 16x16. Si esto y el TILE del shader se desincronizan, salen
-                // resultados parciales sin ningún error de Vulkan.
+                // One workgroup covers a 64x64 tile of C (16x16 threads,
+                // 4x4 each), not 16x16. If this and the shader's TILE ever
+                // drift apart, you get partial results with no Vulkan error
+                // at all.
                 const TILE: usize = 64;
                 vkCmdDispatch(cb, n.div_ceil(TILE) as u32, m.div_ceil(TILE) as u32, 1);
 
@@ -401,9 +403,9 @@ impl Gpu {
             }
         })?;
 
-        let cola = t.lap();
+        let queue = t.lap();
         self.read_into(sc, out)?;
-        t.report(m, k, n, subida, cola);
+        t.report(m, k, n, upload, queue);
         Ok(())
     }
 
@@ -507,15 +509,16 @@ impl Gpu {
         self.buffer(size, usage, MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
     }
 
-    /// Staging visible desde la CPU.
+    /// Staging memory visible from the CPU.
     ///
-    /// `readback` NO es un detalle: medido a 1024x1024, bajar el resultado se
-    /// llevaba 12-18 ms de un total de 20, contra 4.85 de cálculo. La memoria
-    /// HOST_VISIBLE|HOST_COHERENT a secas es, en una placa discreta, memoria
-    /// SIN CACHÉ: escribirla de corrido está bien, pero leerla desde la CPU va
-    /// a paso de peatón (~300 MB/s, que es exactamente lo que daban esos 4 MB).
-    /// Para el buffer que se lee se pide además HOST_CACHED; para los que sólo
-    /// se escriben conviene lo contrario, así que se pide aparte.
+    /// `readback` is NOT a minor detail: measured at 1024x1024, downloading
+    /// the result took 12-18 ms out of a total of 20, against 4.85 for
+    /// compute. Plain HOST_VISIBLE|HOST_COHERENT memory is, on a discrete
+    /// card, UNCACHED memory: writing to it sequentially is fine, but
+    /// reading it from the CPU crawls (~300 MB/s, which is exactly what
+    /// those 4 MB gave). For the buffer that gets read back, HOST_CACHED is
+    /// requested as well; for write-only buffers the opposite is better, so
+    /// it's requested separately.
     fn host_buffer(&self, size: usize, readback: bool) -> Result<Buffer, String> {
         let usage = BUFFER_USAGE_TRANSFER_SRC_BIT | BUFFER_USAGE_TRANSFER_DST_BIT;
         let base = MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT;
@@ -523,8 +526,8 @@ impl Gpu {
             if let Ok(b) = self.buffer(size, usage, base | MEMORY_PROPERTY_HOST_CACHED_BIT) {
                 return Ok(b);
             }
-            // No todas las placas ofrecen cached+coherent; si no está, se sigue
-            // con lo de siempre en vez de fallar.
+            // Not every card offers cached+coherent; if it's not there,
+            // fall back to the usual instead of failing.
         }
         self.buffer(size, usage, base)
     }
@@ -549,7 +552,7 @@ impl Gpu {
 
             let idx = self
                 .find_memory_type(reqs.memory_type_bits, want)
-                .ok_or("no hay tipo de memoria que cumpla los requisitos")?;
+                .ok_or("no memory type satisfies the requirements")?;
             let ai = VkMemoryAllocateInfo {
                 s_type: STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
                 p_next: ptr::null(),
@@ -628,9 +631,9 @@ impl Drop for Gpu {
     fn drop(&mut self) {
         unsafe {
             vkDeviceWaitIdle(self.device);
-            // ANTES de destruir el device. Los campos se dropean después de
-            // este cuerpo, así que los buffers del caché llamarían a
-            // vkDestroyBuffer sobre un device ya destruido.
+            // BEFORE destroying the device. The fields get dropped after
+            // this body runs, so the cache's buffers would otherwise call
+            // vkDestroyBuffer on an already-destroyed device.
             self.cache.borrow_mut().clear();
             vkDestroyPipeline(self.device, self.pipeline, ptr::null());
             vkDestroyPipelineLayout(self.device, self.pipeline_layout, ptr::null());
@@ -837,7 +840,7 @@ fn check(result: VkResult, what: &str) -> Result<(), String> {
     if result == VK_SUCCESS {
         Ok(())
     } else {
-        Err(format!("{} falló con VkResult {}", what, result))
+        Err(format!("{} failed with VkResult {}", what, result))
     }
 }
 
@@ -845,9 +848,9 @@ fn check(result: VkResult, what: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    /// Multiplica en CPU, para contrastar. Deliberadamente la versión tonta:
-    /// si el contraste usara el mismo código que se está probando, no probaría
-    /// nada.
+    /// Multiplies on the CPU, for comparison. Deliberately the dumb version:
+    /// if the reference used the same code being tested, it wouldn't prove
+    /// anything.
     fn reference(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
         let mut c = vec![0.0f32; m * n];
         for i in 0..m {
@@ -865,44 +868,44 @@ mod tests {
         (0..len).map(|i| ((i as f32 * 0.017 + seed).sin())).collect()
     }
 
-    /// Necesita una GPU con Vulkan, así que no corre en la suite normal:
+    /// Needs a GPU with Vulkan, so it doesn't run in the normal suite:
     ///     cargo test --release -- --ignored gpu
     #[test]
-    #[ignore = "necesita una GPU con Vulkan"]
+    #[ignore = "needs a GPU with Vulkan"]
     fn reused_buffers_survive_changing_shapes() {
         let gpu = match Gpu::init() {
             Ok(g) => g,
             Err(e) => {
-                eprintln!("sin GPU utilizable ({e}); nada que probar");
+                eprintln!("no usable GPU ({e}); nothing to test");
                 return;
             }
         };
 
-        // El orden importa: crece, se queda igual, y ACHICA. Si el caché
-        // devolviera el buffer grande sin respetar la forma nueva, o si el
-        // descriptor set quedara apuntando a los buffers viejos, el que falla
-        // es alguno de estos tres, no el primero.
+        // The order matters: grow, stay the same, and SHRINK. If the cache
+        // handed back the large buffer without respecting the new shape, or
+        // if the descriptor set kept pointing at the old buffers, one of
+        // these three would fail, not the first one.
         for (m, k, n) in [(32, 48, 16), (64, 96, 80), (64, 96, 80), (16, 8, 24), (40, 40, 40)] {
             let a = ramp(m * k, 0.3);
             let b = ramp(k * n, 1.1);
-            let got = gpu.matmul(&a, &b, m, k, n).expect("matmul en GPU");
+            let got = gpu.matmul(&a, &b, m, k, n).expect("matmul on GPU");
             let want = reference(&a, &b, m, k, n);
 
-            assert_eq!(want.len(), got.len(), "largo distinto en {m}x{k}x{n}");
+            assert_eq!(want.len(), got.len(), "different length at {m}x{k}x{n}");
             let worst = got.iter().zip(&want).fold(0.0f32, |w, (x, y)| w.max((x - y).abs()));
-            assert!(worst < 1e-3, "{m}x{k}x{n} difiere del reference en {worst:.2e}");
+            assert!(worst < 1e-3, "{m}x{k}x{n} differs from the reference by {worst:.2e}");
         }
     }
 
-    /// La segunda llamada de cualquier proceso fallaba: el descriptor pool
-    /// tenía lugar para un set y se alocaba uno por llamada.
+    /// The second call of any process used to fail: the descriptor pool had
+    /// room for one set and one was being allocated per call.
     #[test]
-    #[ignore = "necesita una GPU con Vulkan"]
+    #[ignore = "needs a GPU with Vulkan"]
     fn many_calls_do_not_exhaust_the_descriptor_pool() {
         let gpu = match Gpu::init() {
             Ok(g) => g,
             Err(e) => {
-                eprintln!("sin GPU utilizable ({e}); nada que probar");
+                eprintln!("no usable GPU ({e}); nothing to test");
                 return;
             }
         };
@@ -910,7 +913,7 @@ mod tests {
         let a = ramp(m * k, 0.7);
         let b = ramp(k * n, 2.3);
         for i in 0..64 {
-            gpu.matmul(&a, &b, m, k, n).unwrap_or_else(|e| panic!("llamada {i} falló: {e}"));
+            gpu.matmul(&a, &b, m, k, n).unwrap_or_else(|e| panic!("call {i} failed: {e}"));
         }
     }
 }

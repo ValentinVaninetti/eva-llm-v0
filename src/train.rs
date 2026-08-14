@@ -11,31 +11,31 @@ use crate::tensor::autograd::backward;
 use crate::tensor::Tensor;
 use crate::tokenizer::ByteTokenizer;
 
-// Ronda 4, segunda intervención de GPT sobre el achatamiento de `alpha`:
-// traza periódica del gradiente de `log_clock` DURANTE el entrenamiento,
-// no sólo en el checkpoint final -- "quiero ver dónde empieza a
-// separarse la trayectoria". Gratis: son los MISMOS gradientes que ya
-// se calculan para el paso del optimizador, ninguna pasada extra.
-// Detrás de `EVA_ALPHA_TRACE=<n>` (cada n pasos), apagado por defecto.
-struct Traza {
-    cada: usize,
-    suma_abs: Vec<Vec<f64>>,
+// Round 4, GPT's second intervention on the flattening of `alpha`: a
+// periodic trace of `log_clock`'s gradient DURING training, not just at
+// the final checkpoint -- "I want to see where the trajectory starts to
+// diverge." Free: these are the SAME gradients already computed for the
+// optimizer step, no extra pass. Behind `EVA_ALPHA_TRACE=<n>` (every n
+// steps), off by default.
+struct Trace {
+    every: usize,
+    abs_sum: Vec<Vec<f64>>,
     n: usize,
 }
 
-impl Traza {
-    fn desde_env(n_blocks: usize, dim: usize) -> Option<Self> {
-        let cada = std::env::var("EVA_ALPHA_TRACE").ok()?.parse::<usize>().ok()?;
-        if cada == 0 { return None; }
-        Some(Traza { cada, suma_abs: vec![vec![0.0; dim]; n_blocks], n: 0 })
+impl Trace {
+    fn from_env(n_blocks: usize, dim: usize) -> Option<Self> {
+        let every = std::env::var("EVA_ALPHA_TRACE").ok()?.parse::<usize>().ok()?;
+        if every == 0 { return None; }
+        Some(Trace { every, abs_sum: vec![vec![0.0; dim]; n_blocks], n: 0 })
     }
 
-    fn acumular(&mut self, model: &EvaModel, grads: &std::collections::HashMap<usize, Vec<f32>>) {
+    fn accumulate(&mut self, model: &EvaModel, grads: &std::collections::HashMap<usize, Vec<f32>>) {
         for (bi, block) in model.blocks.iter().enumerate() {
             if let Mixer::Clock(clock) = &block.mixer {
                 if let Some(g) = grads.get(&clock.log_clock.id) {
                     for (c, &gv) in g.iter().enumerate() {
-                        self.suma_abs[bi][c] += gv.abs() as f64;
+                        self.abs_sum[bi][c] += gv.abs() as f64;
                     }
                 }
             }
@@ -43,13 +43,13 @@ impl Traza {
         self.n += 1;
     }
 
-    fn tal_vez_imprimir(&mut self, model: &EvaModel, step: usize) {
-        if step % self.cada != 0 { return; }
+    fn maybe_print(&mut self, model: &EvaModel, step: usize) {
+        if step % self.every != 0 { return; }
         for (bi, block) in model.blocks.iter().enumerate() {
             let Mixer::Clock(clock) = &block.mixer else { continue };
             let dim = clock.log_clock.data.len();
-            let (mut rapido, mut medio, mut lento) = (0usize, 0usize, 0usize);
-            let mut suma_alpha = 0.0f64;
+            let (mut fast, mut medium, mut slow) = (0usize, 0usize, 0usize);
+            let mut alpha_sum = 0.0f64;
             let antisat = std::env::var("EVA_ALPHA_ANTISAT").is_ok();
             let temp = std::env::var("EVA_ALPHA_TEMP").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
             for c in 0..dim {
@@ -59,37 +59,38 @@ impl Traza {
                 } else {
                     1.0 / (1.0 + (-lc / temp).exp())
                 };
-                suma_alpha += a as f64;
-                if a < 0.05 { rapido += 1 } else if a < 0.3 { medio += 1 } else { lento += 1 }
+                alpha_sum += a as f64;
+                if a < 0.05 { fast += 1 } else if a < 0.3 { medium += 1 } else { slow += 1 }
             }
-            let ga_medio: f64 = self.suma_abs[bi].iter().sum::<f64>() / dim as f64 / self.n.max(1) as f64;
-            println!("  [traza step {step}] bloque {bi}: rápido={rapido} medio={medio} lento={lento} | alpha_media={:.4} | |grad|_medio={:.6} (n={})",
-                suma_alpha / dim as f64, ga_medio, self.n);
+            let mean_grad: f64 = self.abs_sum[bi].iter().sum::<f64>() / dim as f64 / self.n.max(1) as f64;
+            println!("  [trace step {step}] block {bi}: fast={fast} medium={medium} slow={slow} | mean_alpha={:.4} | mean_|grad|={:.6} (n={})",
+                alpha_sum / dim as f64, mean_grad, self.n);
         }
-        for v in self.suma_abs.iter_mut() { v.iter_mut().for_each(|x| *x = 0.0); }
+        for v in self.abs_sum.iter_mut() { v.iter_mut().for_each(|x| *x = 0.0); }
         self.n = 0;
     }
 }
 
-// Ronda 3, benchmark final: el gate como regularizador de entrenamiento,
-// receta consolidada por Dante -- "enseñar donde la tabla es determinística,
-// no tocar donde nadie gana". A diferencia de `mixed_ce` (que mezclaba la
-// tabla en el TARGET y murió medido, monótono negativo), esto suma un sesgo
-// CONSTANTE (sin gradiente propio, `Tensor::new` no pide grad) a los logits
-// ANTES del softmax -- kNN-LM-en-eval trasladado a entrenamiento, con el
-// gradiente real fluyendo de vuelta al modelo a través de `add` (backward de
-// suma = identidad en ambos operandos, pero sólo `logits` tiene grafo).
+// Round 3, final benchmark: the gate as a training regularizer, recipe
+// consolidated by Dante -- "teach where the table is deterministic, don't
+// touch where nobody wins." Unlike `mixed_ce` (which mixed the table into
+// the TARGET and died measured, monotonically negative), this adds a
+// CONSTANT bias (no gradient of its own, `Tensor::new` doesn't request
+// grad) to the logits BEFORE the softmax -- kNN-LM-at-eval carried over to
+// training, with the real gradient flowing back to the model through `add`
+// (backward of a sum = identity on both operands, but only `logits` has a
+// graph).
 //
-// Gate por DETERMINISMO (H de Shannon de la tabla), no por confianza del
-// modelo (`p[argmax]`) como en el gate de eval -- a diferencia de eval, acá
-// hace falta una señal disponible desde el primer paso, cuando el modelo
-// todavía no dice nada útil. H_HIGH=2.0 es una lectura de las bandas ya
-// medidas hoy (c=2: 0.43 bits, 3-9: 0.87, 10-49: 1.47, 50+: 2.16) -- la
-// banda 50+ (irresoluble, nadie le gana) cae cerca de gate≈0, la banda c=2
-// (casi determinística) cerca de gate≈1. Interpretación explícita para que
-// se corrija si no es la intención: no barrida contra val, elegida por
-// lectura directa de un número ya publicado, no por ajuste.
-const GATE_CAP: f32 = 7.7; // mismo cap de Séneca que en lambda_adaptativo.rs
+// Gated by DETERMINISM (Shannon H of the table), not by the model's
+// confidence (`p[argmax]`) like eval's gate -- unlike eval, here we need a
+// signal available from the very first step, when the model still says
+// nothing useful. H_HIGH=2.0 is a reading of the bands already measured
+// today (c=2: 0.43 bits, 3-9: 0.87, 10-49: 1.47, 50+: 2.16) -- the 50+ band
+// (unsolvable, nobody beats it) lands near gate≈0, the c=2 band (nearly
+// deterministic) near gate≈1. Explicit interpretation so it can be
+// corrected if this isn't the intent: not swept against val, chosen by
+// direct reading of an already-published number, not by tuning.
+const GATE_CAP: f32 = 7.7; // same cap Seneca used in adaptive_lambda.rs
 const GATE_H_HIGH: f32 = 2.0;
 const GATE_EPS: f32 = 1e-9;
 
@@ -98,20 +99,20 @@ fn shannon_bits(q: &[f32]) -> f32 {
     nats / std::f32::consts::LN_2
 }
 
-/// Sesgo [seq, vocab] a sumar a los logits crudos antes de la pérdida: cero
-/// donde la tabla no contestó, `β·gate·bias` donde sí. Construido con
-/// `Tensor::new` (requires_grad=false por defecto) -- constante para el
-/// grafo, el gradiente de la pérdida vuelve intacto a los logits del modelo.
-fn injectar_bias(tabla: &Recall, ds: &TextDataset, wi: usize, seq: usize, vocab: usize, beta: f32) -> Tensor {
+/// [seq, vocab] bias to add to the raw logits before the loss: zero where
+/// the table didn't answer, `beta*gate*bias` where it did. Built with
+/// `Tensor::new` (requires_grad=false by default) -- constant for the
+/// graph, the loss's gradient flows back to the model's logits intact.
+fn inject_bias(table: &Recall, ds: &TextDataset, wi: usize, seq: usize, vocab: usize, beta: f32) -> Tensor {
     let mut data = vec![0.0f32; seq * vocab];
     for t in 0..seq {
-        let pos_global = wi * seq + t + 1;
-        let desde = pos_global.saturating_sub(8);
-        let ctx = &ds.ids[desde..pos_global];
+        let global_pos = wi * seq + t + 1;
+        let from = global_pos.saturating_sub(8);
+        let ctx = &ds.ids[from..global_pos];
         if ctx.is_empty() {
             continue;
         }
-        let Some((q, _count)) = tabla.lookup_detail(ctx, vocab) else { continue };
+        let Some((q, _count)) = table.lookup_detail(ctx, vocab) else { continue };
         let h = shannon_bits(&q);
         let gate = (1.0 - h / GATE_H_HIGH).clamp(0.0, 1.0);
         if gate == 0.0 {
@@ -135,56 +136,56 @@ pub struct TrainConfig {
     pub log_every: usize,
     pub out_path: String,
     pub resume: Option<String>,
-    /// Qué fracción de las ventanas se reserva para validar. 0 la apaga.
+    /// What fraction of the windows is held out for validation. 0 turns it off.
     pub val_frac: f32,
-    /// Umbral de sorpresa. 0 = aprender de todo (la convención de hoy).
+    /// Surprise threshold. 0 = learn from everything (today's convention).
     pub surprise: f32,
-    /// Crédito local: cada bloque con su objetivo, sin gradiente que cruce.
+    /// Local credit: each block with its own objective, no crossing gradient.
     pub local: bool,
-    /// El estado de ClockMem no se reinicia entre ventanas.
+    /// ClockMem's state doesn't reset between windows.
     pub persist: bool,
-    /// Recorrer el corpus en orden sin persistir estado. Es el CONTROL de
-    /// `--persist`: sin esto se compararían dos cambios a la vez, el orden y
-    /// la memoria, y no se sabría cuál produjo la diferencia.
+    /// Walk the corpus in order without persisting state. This is the
+    /// CONTROL for `--persist`: without it two changes would be compared
+    /// at once, order and memory, and there'd be no way to know which one
+    /// produced the difference.
     pub inorder: bool,
-    /// β del regularizador de tabla (0.0 = apagado, entrenamiento normal,
-    /// idéntico a antes de esta receta). Gate por determinismo de la tabla,
-    /// no por confianza del modelo -- ver comentario junto a `injectar_bias`.
+    /// Beta of the table regularizer (0.0 = off, normal training, identical
+    /// to before this recipe). Gated by the table's determinism, not by the
+    /// model's confidence -- see the comment next to `inject_bias`.
     pub gate_beta: f32,
-    /// Ronda 4, hipótesis de GPT ("supervivencia"): probabilidad de que CADA
-    /// bloque se saltee, independiente, en cada paso (0.0 = apagado,
-    /// idéntico a antes). Reusa `forward_skips` (ya público, el mismo que
-    /// usa `techo`) -- es Stochastic Depth (Huang et al. 2016) a nivel de
-    /// bloque, sin sesgo hacia ningún bloque en particular a propósito: la
-    /// pregunta es si la red redistribuye dependencia sola, no si la
-    /// forzamos a hacerlo.
+    /// Round 4, GPT's hypothesis ("survival"): probability that EACH block
+    /// gets skipped, independently, on every step (0.0 = off, identical to
+    /// before). Reuses `forward_skips` (already public, the same one
+    /// `ceiling` uses) -- this is Stochastic Depth (Huang et al. 2016) at
+    /// the block level, deliberately without any bias toward a particular
+    /// block: the question is whether the network redistributes dependence
+    /// on its own, not whether we force it to.
     pub destroy_p: f32,
 }
 
 pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
     let ds = TextDataset::from_file(&tcfg.data_path, mcfg.seq_len)
-        .map_err(|e| format!("no se pudo leer {}: {}", tcfg.data_path, e))?;
+        .map_err(|e| format!("could not read {}: {}", tcfg.data_path, e))?;
     let n_windows = ds.num_windows();
     if n_windows == 0 {
-        return Err(format!("el dataset es muy chico para seq_len {}", mcfg.seq_len));
+        return Err(format!("the dataset is too small for seq_len {}", mcfg.seq_len));
     }
 
     let mut model = match &tcfg.resume {
-        Some(p) => load_model(p).map_err(|e| format!("no se pudo cargar {}: {}", p, e))?,
+        Some(p) => load_model(p).map_err(|e| format!("could not load {}: {}", p, e))?,
         None => EvaModel::new(mcfg.clone()),
     };
     let mut rng = crate::rng::Rng::new(tcfg.seed);
     let mut opt = AdamW::new(tcfg.lr, tcfg.wd);
-    // El calentamiento es una época corta: antes de eso la media móvil se
-    // calcularía con un modelo aleatorio y no significaría nada.
+    // Warmup is a short epoch: before that, the moving average would be
+    // computed with a random model and would mean nothing.
     let mut gate = crate::learn::gate(tcfg.surprise, 200);
-    // Se cuentan por separado porque el backward cuesta el doble que el
-    // forward: comparar corridas por "pasos" escondería justo lo que se quiere
-    // medir.
+    // Counted separately because backward costs twice what forward does:
+    // comparing runs by "steps" would hide exactly what we want to measure.
     let (mut fwd, mut bwd) = (0usize, 0usize);
 
-    // Andamio de entrenamiento: una cabeza por bloque intermedio. No se
-    // guarda en el checkpoint, así la inferencia queda idéntica.
+    // Training scaffolding: one head per intermediate block. Not saved in
+    // the checkpoint, so inference stays identical.
     let mut heads = tcfg.local.then(|| {
         crate::local::Heads::new(
             model.blocks.len().saturating_sub(1),
@@ -195,18 +196,19 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
         )
     });
     if let Some(h) = &heads {
-        println!("eva: CRÉDITO LOCAL, ningún gradiente cruza de bloque a bloque");
-        println!("eva: {} params extra en cabezas auxiliares (andamio, no van al modelo)", h.count());
+        println!("eva: LOCAL CREDIT, no gradient crosses from block to block");
+        println!("eva: {} extra params in auxiliary heads (scaffolding, not part of the model)", h.count());
     }
 
     let total_params = model.param_count();
     println!("eva: dataset {} bytes, {} windows, {} params",
         ds.ids.len(), n_windows, total_params);
 
-    // EL CORTE VA AL FINAL Y CONTIGUO, no salteado. Las ventanas vecinas
-    // comparten contexto: con un corte aleatorio, el modelo ve en entrenamiento
-    // el texto pegado a lo que después se le toma como examen, y la validación
-    // da mejor de lo que corresponde. Un examen que filtra no mide nada.
+    // THE CUT GOES AT THE END AND IS CONTIGUOUS, not scattered. Neighboring
+    // windows share context: with a random cut, the model would see during
+    // training the text right next to what later gets treated as the exam,
+    // and validation would score better than it should. An exam that leaks
+    // doesn't measure anything.
     let n_val = if tcfg.val_frac > 0.0 {
         (((n_windows as f32) * tcfg.val_frac).round() as usize).clamp(1, n_windows / 2)
     } else {
@@ -214,25 +216,25 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
     };
     let n_train = n_windows - n_val;
     if n_train == 0 {
-        return Err("no quedan ventanas de entrenamiento después del corte".into());
+        return Err("no training windows left after the cut".into());
     }
-    println!("eva: {n_train} ventanas para entrenar, {n_val} para validar");
+    println!("eva: {n_train} windows to train on, {n_val} to validate");
 
-    // Tabla congelada, construida SOLO sobre train -- misma disciplina que
-    // los scripts de eval de hoy. None si el regularizador está apagado
-    // (β=0.0): cero costo extra, entrenamiento idéntico al de siempre.
-    let tabla: Option<Recall> = if tcfg.gate_beta > 0.0 {
+    // Frozen table, built ONLY on train -- same discipline as today's eval
+    // scripts. None if the regularizer is off (beta=0.0): zero extra cost,
+    // training identical to before.
+    let table: Option<Recall> = if tcfg.gate_beta > 0.0 {
         let bytes_train: Vec<usize> = ds.ids[..n_train * mcfg.seq_len].to_vec();
         let t = Recall::build(&bytes_train);
-        println!("eva: regularizador de tabla ACTIVO, β={:.2}, H_HIGH={GATE_H_HIGH:.1} (gate por determinismo, no confianza)", tcfg.gate_beta);
+        println!("eva: table regularizer ACTIVE, beta={:.2}, H_HIGH={GATE_H_HIGH:.1} (gated by determinism, not confidence)", tcfg.gate_beta);
         Some(t)
     } else {
         None
     };
 
-    let mut traza = Traza::desde_env(model.blocks.len(), mcfg.dim);
-    if traza.is_some() {
-        println!("eva: TRAZA de alpha/gradiente ACTIVA (EVA_ALPHA_TRACE)");
+    let mut trace = Trace::from_env(model.blocks.len(), mcfg.dim);
+    if trace.is_some() {
+        println!("eva: alpha/gradient TRACE ACTIVE (EVA_ALPHA_TRACE)");
     }
 
     let total_steps = n_train * tcfg.epochs;
@@ -241,12 +243,12 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
     let t0 = Instant::now();
     let mut last_log = Instant::now();
 
-    // CON ESTADO PERSISTENTE HAY QUE IR EN ORDEN. Barajar llenaría el estado
-    // con contexto de un documento que no tiene nada que ver con el siguiente:
-    // eso no es memoria, es ruido. Y como el orden también afecta al
-    // entrenamiento, la línea base para comparar tiene que correr en orden
-    // igual -- si no, se estarían comparando dos cosas a la vez.
-    let mut estados = model.fresh_states();
+    // WITH PERSISTENT STATE YOU HAVE TO GO IN ORDER. Shuffling would fill
+    // the state with context from a document that has nothing to do with
+    // the next one: that's not memory, it's noise. And since order also
+    // affects training, the baseline for comparison has to run in order
+    // too -- otherwise two things would be getting compared at once.
+    let mut states = model.fresh_states();
 
     for epoch in 0..tcfg.epochs {
         let order: Vec<usize> = if tcfg.persist || tcfg.inorder {
@@ -260,16 +262,17 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
             fwd += 1;
             let loss_v = if let Some(h) = heads.as_mut() {
                 bwd += 1;
-                paso_local(&mut model, h, &mut opt, &input, &target)
+                local_step(&mut model, h, &mut opt, &input, &target)
             } else {
-                // EL GRAFO SE LIBERA ANTES DEL OPTIMIZADOR, y no es cosmético.
-                // Los pesos se comparten con el grafo por `Arc`; si el grafo
-                // sigue vivo, `make_mut` del optimizador copia CADA parámetro
-                // en CADA paso. No daría error: sólo andaría lento. Por eso el
-                // ámbito, y por eso el contador de copias de más abajo.
+                // THE GRAPH GETS FREED BEFORE THE OPTIMIZER, and it's not
+                // cosmetic. The weights are shared with the graph through
+                // `Arc`; if the graph is still alive, the optimizer's
+                // `make_mut` copies EVERY parameter on EVERY step. It
+                // wouldn't error: it would just run slow. That's why the
+                // scope, and that's why the copy counter further below.
                 let (loss_v, grads) = {
                     let logits = if tcfg.persist {
-                        model.forward_carrying(&input, &mut estados)
+                        model.forward_carrying(&input, &mut states)
                     } else if tcfg.destroy_p > 0.0 {
                         let skips: Vec<usize> = (0..model.blocks.len())
                             .filter(|_| rng.next_f32() < tcfg.destroy_p)
@@ -278,13 +281,13 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
                     } else {
                         model.forward(&input)
                     };
-                    // El sesgo es constante (sin grafo): `add` sólo necesita
-                    // grad de `logits`, que sí lo tiene. Nada nuevo que
-                    // gradcheckear -- son dos ops existentes compuestas.
-                    let logits = match &tabla {
+                    // The bias is constant (no graph): `add` only needs
+                    // grad from `logits`, which it does have. Nothing new
+                    // to gradcheck -- these are two existing ops composed.
+                    let logits = match &table {
                         Some(t) => crate::tensor::ops::add(
                             &logits,
-                            &injectar_bias(t, &ds, wi, mcfg.seq_len, mcfg.vocab, tcfg.gate_beta),
+                            &inject_bias(t, &ds, wi, mcfg.seq_len, mcfg.vocab, tcfg.gate_beta),
                         ),
                         None => logits,
                     };
@@ -299,8 +302,8 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
                 };
                 if let Some(grads) = grads {
                     bwd += 1;
-                    if let Some(tr) = traza.as_mut() {
-                        tr.acumular(&model, &grads);
+                    if let Some(tr) = trace.as_mut() {
+                        tr.accumulate(&model, &grads);
                     }
                     let mut params = model.parameters_mut();
                     crate::prof::time(crate::prof::P::Optim, || opt.step(&mut params, &grads));
@@ -311,8 +314,8 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
             running += loss_v;
             step += 1;
 
-            if let Some(tr) = traza.as_mut() {
-                tr.tal_vez_imprimir(&model, step);
+            if let Some(tr) = trace.as_mut() {
+                tr.maybe_print(&model, step);
             }
 
             if step % tcfg.log_every == 0 {
@@ -331,54 +334,55 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
 
             if n_val > 0 && step % (tcfg.log_every * 5) == 0 {
                 let vl = eval_loss(&model, &ds, n_train, n_windows);
-                println!("  validación: loss {:.4} | {:.3} bits/byte", vl, bits_per_byte(vl));
+                println!("  validation: loss {:.4} | {:.3} bits/byte", vl, bits_per_byte(vl));
             }
 
             if step % (tcfg.log_every * 10) == 0 {
                 let sample = generate_sample(&model, mcfg.seq_len, 64, &mut rng);
                 println!("sample: {:?}", ByteTokenizer::decode(&sample));
-                save_model(&tcfg.out_path, &model).map_err(|e| format!("no se pudo guardar: {}", e))?;
+                save_model(&tcfg.out_path, &model).map_err(|e| format!("could not save: {}", e))?;
             }
         }
     }
 
-    save_model(&tcfg.out_path, &model).map_err(|e| format!("no se pudo guardar: {}", e))?;
-    println!("eva: pico de memoria del proceso {:.1} MB", crate::local::peak_rss_mb());
-    crate::tensor::held::informe(total_params);
-    let copias = crate::optim::copias_de_parametros();
-    println!("  copias de parámetros por Arc compartido: {copias}  (tiene que ser 0)");
+    save_model(&tcfg.out_path, &model).map_err(|e| format!("could not save: {}", e))?;
+    println!("eva: process memory peak {:.1} MB", crate::local::peak_rss_mb());
+    crate::tensor::held::report(total_params);
+    let copies = crate::optim::parameter_copies();
+    println!("  parameter copies from a shared Arc: {copies}  (has to be 0)");
     if n_val > 0 {
-        // Con estado limpio: comparable con cualquier corrida.
+        // With clean state: comparable to any run.
         let vl = eval_loss(&model, &ds, n_train, n_windows);
         if tcfg.persist {
-            // Y con el estado que viene del texto anterior, que es la ventaja
-            // que se está probando. Van SEPARADOS: mezclarlos sería cantar
-            // victoria por una diferencia que no es la que se cree.
+            // And with the state carried over from prior text, which is
+            // the advantage being tested. Reported SEPARATELY: mixing them
+            // would be claiming victory for a difference that isn't the
+            // one actually believed to be there.
             let vp = eval_loss_carrying(&model, &ds, n_train, n_windows);
-            println!("eva: validación con estado heredado {:.4} | {:.3} bits/byte",
+            println!("eva: validation with inherited state {:.4} | {:.3} bits/byte",
                 vp, bits_per_byte(vp));
         }
-        // EL NÚMERO CON EL QUE SE COMPARAN ARQUITECTURAS. La pérdida de
-        // entrenamiento sólo dice cuánto memorizó.
-        println!("eva: VALIDACIÓN FINAL loss {:.4} | {:.3} bits/byte ({} ventanas, arch {})",
+        // THE NUMBER ARCHITECTURES ARE COMPARED ON. Training loss only says
+        // how much it memorized.
+        println!("eva: FINAL VALIDATION loss {:.4} | {:.3} bits/byte ({} windows, arch {})",
             vl, bits_per_byte(vl), n_windows - n_train, mcfg.arch.name());
-        println!("eva: regla '{}' | {} forward, {} backward ({:.0}% aprendidos)",
+        println!("eva: rule '{}' | {} forward, {} backward ({:.0}% learned)",
             gate.name(), fwd, bwd, 100.0 * bwd as f32 / fwd.max(1) as f32);
     }
     let elapsed: Duration = t0.elapsed();
     crate::prof::report(elapsed);
-    println!("eva: entrenamiento terminado en {:.1}s, pesos en {}", elapsed.as_secs_f32(), tcfg.out_path);
+    println!("eva: training finished in {:.1}s, weights in {}", elapsed.as_secs_f32(), tcfg.out_path);
     Ok(())
 }
 
-/// Un paso con crédito local. Devuelve la pérdida del ÚLTIMO bloque, que es la
-/// salida real del modelo y por lo tanto lo comparable con la línea base.
+/// One step with local credit. Returns the LAST block's loss, which is the
+/// model's real output and therefore what's comparable to the baseline.
 ///
-/// La clave está en el orden: cada bloque retropropaga, actualiza y **libera**
-/// antes de que empiece el siguiente. Sumar las pérdidas y hacer un backward
-/// al final daría los mismos gradientes y **ningún ahorro de memoria**, que es
-/// justamente lo único que se está tratando de comprar acá.
-fn paso_local(
+/// The key is the order: each block backpropagates, updates, and **frees**
+/// before the next one starts. Summing the losses and doing one backward at
+/// the end would give the same gradients and **no memory savings**, which
+/// is the one thing actually being bought here.
+fn local_step(
     model: &mut EvaModel,
     heads: &mut crate::local::Heads,
     opt: &mut AdamW,
@@ -388,19 +392,19 @@ fn paso_local(
     use crate::tensor::ops as ops;
     let n = model.blocks.len();
     let mut x = model.embed.embed(input);
-    let mut ultima = 0.0;
+    let mut last = 0.0;
 
     for i in 0..n {
         let y = model.blocks[i].forward(&x);
-        let final_ = i + 1 == n;
-        let logits = if final_ {
+        let is_last = i + 1 == n;
+        let logits = if is_last {
             ops::matmul(&model.norm_out.forward(&y), &model.head_w)
         } else {
             heads.logits(i, &y)
         };
         let loss = ops::cross_entropy(&logits, target);
-        if final_ {
-            ultima = loss.data[0];
+        if is_last {
+            last = loss.data[0];
         }
 
         let grads = crate::prof::time(crate::prof::P::Backward, || backward(&loss));
@@ -410,7 +414,7 @@ fn paso_local(
             params.push(&mut model.embed.table);
         }
         params.extend(model.blocks[i].parameters_mut());
-        if final_ {
+        if is_last {
             params.extend(model.norm_out.parameters_mut());
             params.push(&mut model.head_w);
         } else {
@@ -418,14 +422,15 @@ fn paso_local(
         }
         crate::prof::time(crate::prof::P::Optim, || opt.step(&mut params, &grads));
 
-        // `detach` es lo que corta el crédito: el bloque siguiente arranca de
-        // un tensor sin grafo detrás, así el de este bloque se libera acá.
+        // `detach` is what cuts the credit: the next block starts from a
+        // tensor with no graph behind it, so this block's graph gets freed
+        // right here.
         x = y.detach();
     }
-    ultima
+    last
 }
 
-/// Pérdida media sobre ventanas que el modelo nunca vio. Sin backward.
+/// Mean loss over windows the model never saw. No backward.
 fn eval_loss(model: &EvaModel, ds: &TextDataset, from: usize, to: usize) -> f32 {
     let mut sum = 0.0;
     for wi in from..to {
@@ -436,32 +441,32 @@ fn eval_loss(model: &EvaModel, ds: &TextDataset, from: usize, to: usize) -> f32 
     sum / (to - from) as f32
 }
 
-/// Como `eval_loss`, pero dejando correr el estado de una ventana a la otra:
-/// el examen se toma con la memoria que el texto anterior dejó.
+/// Like `eval_loss`, but letting the state carry from one window to the
+/// next: the exam is taken with the memory the previous text left behind.
 fn eval_loss_carrying(model: &EvaModel, ds: &TextDataset, from: usize, to: usize) -> f32 {
-    let mut estados = model.fresh_states();
+    let mut states = model.fresh_states();
     let mut sum = 0.0;
-    let mut pico = 0.0f32;
+    let mut peak = 0.0f32;
     for wi in from..to {
         let (input, target) = ds.window(wi);
-        let logits = model.forward_carrying(&input, &mut estados);
+        let logits = model.forward_carrying(&input, &mut states);
         sum += crate::tensor::ops::cross_entropy(&logits, &target).data[0];
-        for e in estados.iter() {
+        for e in states.iter() {
             for v in e {
-                pico = pico.max(v.abs());
+                peak = peak.max(v.abs());
             }
         }
     }
-    // Si esto es enorme, los canales lentos (alpha cerca de 1) están
-    // acumulando sin olvidar y el estado saturó: el problema sería la
-    // inicialización del reloj, no la idea de persistir.
-    println!("eva: magnitud máxima del estado heredado: {pico:.2}");
+    // If this is huge, the slow channels (alpha near 1) are accumulating
+    // without forgetting and the state saturated: the problem would be the
+    // clock's initialization, not the idea of persisting.
+    println!("eva: max magnitude of the inherited state: {peak:.2}");
     sum / (to - from) as f32
 }
 
-/// Bits por byte: la unidad honesta para un modelo byte-level, y comparable
-/// entre corpus y entre arquitecturas. La pérdida en nats no le dice nada a
-/// nadie.
+/// Bits per byte: the honest unit for a byte-level model, and comparable
+/// across corpora and across architectures. Loss in nats doesn't tell
+/// anyone anything.
 fn bits_per_byte(loss: f32) -> f32 {
     loss / std::f32::consts::LN_2
 }

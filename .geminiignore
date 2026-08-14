@@ -1,9 +1,0 @@
-# Binarios de pesos: nunca como contexto
-*.weights
-
-# Datos y artefactos
-/data/
-/target/
-
-# Repo interno
-.git/

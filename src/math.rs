@@ -1,15 +1,16 @@
 use crate::pool::Ptr;
 
-/// A partir de cuánto trabajo conviene la GPU, MEDIDO (GTX 1650, `eva gpu`):
+/// The amount of work above which the GPU pays off, MEASURED (GTX 1650,
+/// `eva gpu`):
 ///
 /// ```text
-///   128³ = 2.1M   CPU gana 1.25x     el costo fijo de subir/encolar/bajar
-///   192³ = 7.1M   GPU gana 1.29x     todavía no se amortiza abajo de esto
-///   512³ = 134M   GPU gana 8.68x
+///   128^3 = 2.1M   CPU wins 1.25x     the fixed cost of upload/queue/download
+///   192^3 = 7.1M   GPU wins 1.29x     still not amortized below this
+///   512^3 = 134M   GPU wins 8.68x
 /// ```
 ///
-/// El cruce está entre esos dos; 4M es el punto medio. **Es el número de una
-/// GTX 1650**: en la RX 580 hay que volver a medirlo, no heredarlo.
+/// The crossover is between those two; 4M is the midpoint. **This is a GTX
+/// 1650 number**: on the RX 580 it has to be re-measured, not inherited.
 const GPU_FROM: usize = 4_000_000;
 
 pub fn matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, out: &mut [f32]) {
@@ -68,16 +69,16 @@ fn matmul_inner(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, out: &mut [f
     pool.run(chunks, f);
 }
 
-/// Intenta hacerlo en la GPU. Devuelve `false` si no hay o si falló, y en ese
-/// caso el que llama sigue por CPU como si nada.
+/// Tries to run it on the GPU. Returns `false` if there isn't one or if it
+/// failed, and in that case the caller just continues on the CPU.
 ///
-/// SE PRENDE CON `EVA_GPU=1`, a propósito apagado por defecto: la GPU suma en
-/// otro orden, así que dos entrenamientos con y sin ella no dan bit a bit lo
-/// mismo. Que eso pase tiene que ser una decisión, no una sorpresa.
+/// TURNED ON WITH `EVA_GPU=1`, deliberately off by default: the GPU sums in
+/// a different order, so two training runs with and without it won't match
+/// bit for bit. That has to be a decision, not a surprise.
 ///
-/// Por hilo, y no global, porque los handles de Vulkan no son `Send`. En la
-/// práctica sólo el hilo principal llega hasta acá: los workers del pool
-/// entran por `matmul_rows`, más abajo.
+/// Per-thread, not global, because Vulkan handles aren't `Send`. In
+/// practice only the main thread ever reaches here: the pool's workers
+/// enter through `matmul_rows`, further below.
 fn gpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, out: &mut [f32]) -> bool {
     use std::cell::OnceCell;
     thread_local! {
@@ -90,11 +91,11 @@ fn gpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, out: &mut [f32
             }
             match crate::gpu::Gpu::init() {
                 Ok(g) => {
-                    eprintln!("[eva] matmul por GPU: {}", g.info().name);
+                    eprintln!("[eva] matmul on GPU: {}", g.info().name);
                     Some(g)
                 }
                 Err(e) => {
-                    eprintln!("[eva] sin GPU ({e}); sigo por CPU");
+                    eprintln!("[eva] no GPU ({e}); continuing on CPU");
                     None
                 }
             }
@@ -103,10 +104,10 @@ fn gpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, out: &mut [f32
             None => false,
             Some(g) => match g.matmul_into(a, b, m, k, n, out) {
                 Ok(()) => true,
-                // Un error de Vulkan a mitad de un entrenamiento no puede
-                // tirarlo abajo: se avisa y se sigue por CPU.
+                // A Vulkan error midway through a training run can't take
+                // it down: it gets reported and we continue on the CPU.
                 Err(e) => {
-                    eprintln!("[eva] la GPU falló ({e}); sigo por CPU");
+                    eprintln!("[eva] the GPU failed ({e}); continuing on CPU");
                     false
                 }
             },
@@ -243,6 +244,6 @@ mod tests {
                 bad += 1;
             }
         }
-        assert_eq!(bad, 0, "{} elementos difieren entre threaded y scalar", bad);
+        assert_eq!(bad, 0, "{} elements differ between threaded and scalar", bad);
     }
 }

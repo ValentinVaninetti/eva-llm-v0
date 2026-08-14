@@ -1,54 +1,56 @@
-//! Conocimiento en una tabla, no en los pesos.
+//! Knowledge in a table, not in the weights.
 //!
-//! ESTO EXISTE PARA DECIDIR LA HIPÓTESIS CENTRAL DEL PROYECTO:
+//! THIS EXISTS TO DECIDE THE PROJECT'S CENTRAL HYPOTHESIS:
 //!
-//! > ¿Se puede separar lo que necesita **generalizar** de lo que sólo necesita
-//! > **recordarse**, sin perder la capacidad de razonar sobre lo recordado?
+//! > Can what needs to **generalize** be separated from what only needs to
+//! > **be remembered**, without losing the ability to reason over what was
+//! > remembered?
 //!
-//! Si la respuesta es sí, el costo de las LLM se derrumba: los hechos son
-//! muchísima información y no necesitan representación distribuida; la
-//! estructura del lenguaje es poca y sí la necesita. Hoy se paga precio de
-//! generalización para guardar cosas que sólo hay que recordar.
+//! If the answer is yes, the cost of LLMs collapses: facts are a huge
+//! amount of information and don't need distributed representation; the
+//! structure of language is little and does need it. Today the cost of
+//! generalization is being paid to store things that only need remembering.
 //!
-//! LA FORMA MÁS PURA DE PROBARLO es la más tonta: una tabla de k-gramas
-//! exactos del texto de entrenamiento. Cero parámetros, cero entrenamiento, es
-//! literalmente una tabla de consulta. Si **la mitad del modelo más la tabla**
-//! alcanza al modelo entero, la hipótesis se sostiene. Si no, el conocimiento
-//! en los pesos estaba haciendo algo que una tabla no reemplaza -- y eso
-//! también hay que saberlo.
+//! THE PUREST WAY TO TEST IT is the dumbest one: a table of exact k-grams
+//! from the training text. Zero parameters, zero training, it's literally a
+//! lookup table. If **half the model plus the table** matches the full
+//! model, the hypothesis holds. If not, the knowledge in the weights was
+//! doing something a table doesn't replace -- and that's worth knowing too.
 //!
-//! NO SE AJUSTA NADA CONTRA VALIDACIÓN. El peso de mezcla se elige sobre una
-//! porción de desarrollo separada del entrenamiento; validación se toca una
-//! sola vez, al final. Ajustar la mezcla mirando el examen daría un número
-//! lindo y falso.
+//! NOTHING IS TUNED AGAINST VALIDATION. The mixing weight is chosen on a
+//! development slice separate from training; validation is touched exactly
+//! once, at the end. Tuning the mix while looking at the exam would give a
+//! nice-looking, fake number.
 
 use std::collections::HashMap;
 
-/// Órdenes de k-grama, del más específico al más general.
+/// K-gram orders, from most specific to most general.
 ///
-/// Tope de 8 porque así el contexto entra exacto en un `u64` y **no hay
-/// colisiones de hash**: la clave *es* el contexto. Con un hash de por medio,
-/// dos contextos distintos podrían compartir entrada y el experimento mediría
-/// las colisiones en vez de la hipótesis.
+/// Capped at 8 because that way the context fits exactly in a `u64` and
+/// **there are no hash collisions**: the key *is* the context. With a hash
+/// in between, two different contexts could share an entry and the
+/// experiment would be measuring collisions instead of the hypothesis.
 const ORDERS: [usize; 5] = [8, 6, 4, 3, 2];
 
-/// Cuántas veces tiene que haberse visto un contexto para creerle.
+/// How many times a context has to have been seen before it's trusted.
 ///
-/// Con una sola aparición la "distribución" es un único byte con probabilidad
-/// 1, que es memorización pura y engaña: sube en entrenamiento y no generaliza.
+/// With a single occurrence the "distribution" is a single byte with
+/// probability 1, which is pure memorization and is misleading: it goes up
+/// during training and doesn't generalize.
 const MIN_COUNT: u32 = 2;
 
 pub struct Recall {
-    /// Una tabla por orden: contexto empaquetado -> (byte siguiente, veces).
+    /// One table per order: packed context -> (next byte, count).
     tables: Vec<HashMap<u64, Vec<(u8, u32)>>>,
-    /// Orden mínimo aceptado. Con 2 la tabla contesta casi siempre, pero un
-    /// bigrama NO es conocimiento: es estadística genérica del idioma. Subirlo
-    /// deja sólo los aciertos específicos, y sirve para separar "recuperar
-    /// algo puntual" de "suavizar con n-gramas", que son cosas distintas y dan
-    /// el mismo número si no se miran por separado.
+    /// Minimum order accepted. At 2 the table answers almost always, but a
+    /// bigram is NOT knowledge: it's generic language statistics. Raising it
+    /// keeps only the specific hits, and lets us separate "retrieving
+    /// something specific" from "smoothing with n-grams", which are
+    /// different things that give the same number if not looked at
+    /// separately.
     min_order: usize,
-    /// Cuántas veces contestó cada orden, para poder mirar de dónde viene la
-    /// mejora en vez de suponerlo.
+    /// How many times each order answered, to see where the improvement
+    /// comes from instead of assuming it.
     pub hits: std::cell::RefCell<[usize; ORDERS.len()]>,
 }
 
@@ -56,7 +58,7 @@ fn pack(ctx: &[usize]) -> u64 {
     ctx.iter().fold(0u64, |acc, &b| (acc << 8) | (b as u64 & 0xff))
 }
 
-/// Normaliza las continuaciones de un contexto a una distribución.
+/// Normalizes a context's continuations into a distribution.
 fn distribution(hits: &[(u8, u32)], vocab: usize) -> Vec<f32> {
     let total: u32 = hits.iter().map(|(_, c)| *c).sum();
     let mut p = vec![0.0f32; vocab];
@@ -68,8 +70,8 @@ fn distribution(hits: &[(u8, u32)], vocab: usize) -> Vec<f32> {
 }
 
 impl Recall {
-    /// Construye la tabla **sólo con los bytes de entrenamiento**. Que acá
-    /// entre un byte de validación invalida todo el experimento.
+    /// Builds the table **only from the training bytes**. Letting a
+    /// validation byte in here invalidates the whole experiment.
     pub fn build(train: &[usize]) -> Self {
         let mut tables = Vec::with_capacity(ORDERS.len());
         for &k in &ORDERS {
@@ -94,7 +96,7 @@ impl Recall {
         Recall { tables, min_order, hits: std::cell::RefCell::new([0; ORDERS.len()]) }
     }
 
-    /// Reparto de aciertos por orden de k-grama, en porcentaje.
+    /// Breakdown of hits by k-gram order, in percent.
     pub fn hit_profile(&self) -> Vec<(usize, f32)> {
         let h = self.hits.borrow();
         let total: usize = h.iter().sum();
@@ -105,30 +107,32 @@ impl Recall {
             .collect()
     }
 
-    /// Distribución del byte siguiente según la tabla, o `None` si no vio este
-    /// contexto lo suficiente.
+    /// Distribution of the next byte according to the table, or `None` if
+    /// this context wasn't seen enough.
     ///
-    /// Baja de orden hasta encontrar algo: primero pregunta por los últimos 8
-    /// bytes, después 6, y así. Contexto más largo es más específico y más
-    /// confiable; el retroceso es lo que evita quedarse mudo casi siempre.
+    /// Falls back to lower orders until it finds something: first it asks
+    /// about the last 8 bytes, then 6, and so on. A longer context is more
+    /// specific and more reliable; the fallback is what keeps it from
+    /// staying silent almost all the time.
     pub fn lookup(&self, ctx: &[usize], vocab: usize) -> Option<Vec<f32>> {
         let hits = self.find(ctx)?;
         Some(distribution(hits, vocab))
     }
 
-    /// Igual que `lookup`, pero además expone CUÁNTAS veces se vio el contexto
-    /// que contestó (`total`). Es la variable que `lookup` descarta: un
-    /// contexto visto 2 veces y uno visto 500 devuelven la misma distribución
-    /// (certeza 1.0) y el caller no puede distinguirlos. Para un λ por count
-    /// hace falta el count, y acá sale.
+    /// Same as `lookup`, but also exposes HOW MANY times the context that
+    /// answered was seen (`total`). It's the variable `lookup` throws away:
+    /// a context seen 2 times and one seen 500 times return the same
+    /// distribution (certainty 1.0) and the caller can't tell them apart.
+    /// A per-count lambda needs the count, and here it is.
     pub fn lookup_detail(&self, ctx: &[usize], vocab: usize) -> Option<(Vec<f32>, u32)> {
         let hits = self.find(ctx)?;
         let total: u32 = hits.iter().map(|(_, c)| *c).sum();
         Some((distribution(hits, vocab), total))
     }
 
-    /// El contexto que contesta: baja de orden hasta encontrar uno con
-    /// suficientes apariciones, y cuenta el acierto en `hits` para el perfil.
+    /// The context that answers: falls back to lower orders until it finds
+    /// one with enough occurrences, and counts the hit in `hits` for the
+    /// profile.
     fn find(&self, ctx: &[usize]) -> Option<&Vec<(u8, u32)>> {
         for (ti, &k) in ORDERS.iter().enumerate() {
             if k < self.min_order || ctx.len() < k {
@@ -146,40 +150,40 @@ impl Recall {
         None
     }
 
-    /// Suma UNA observación de uso, con la misma disciplina de conteo que
-    /// `build()`: no reemplaza nada, no marca "ésta es LA respuesta" -- es
-    /// un voto más para `byte_real` en el contexto dado, en TODOS los
-    /// órdenes que ese contexto alcanza a llenar (igual que una posición de
-    /// entrenamiento real habría hecho). Si el contexto es ambiguo, es un
-    /// voto honesto entre varios; si el hecho se repite, `MIN_COUNT` y la
-    /// distribución lo consolidan solos -- el maestro que remarca, no el
-    /// que grita.
+    /// Adds ONE usage observation, with the same counting discipline as
+    /// `build()`: it doesn't replace anything, doesn't mark "this is THE
+    /// answer" -- it's one more vote for `real_byte` in the given context,
+    /// across EVERY order that context reaches into (just like a real
+    /// training position would have done). If the context is ambiguous,
+    /// it's an honest vote among several; if the fact repeats, `MIN_COUNT`
+    /// and the distribution consolidate it on their own -- the teacher who
+    /// marks it, not the one who shouts.
     ///
-    /// Precedente: caché en línea de kNN-LM/modelos de caché (Grave et al.,
-    /// "Improving Neural Language Models with a Continuous Cache") -- una
-    /// memoria externa que se extiende con lo que se va viendo, sin tocar
-    /// los pesos.
-    pub fn observe(&mut self, ctx: &[usize], byte_real: u8) {
+    /// Precedent: online cache from kNN-LM / cache models (Grave et al.,
+    /// "Improving Neural Language Models with a Continuous Cache") -- an
+    /// external memory that extends with what it keeps seeing, without
+    /// touching the weights.
+    pub fn observe(&mut self, ctx: &[usize], real_byte: u8) {
         for (ti, &k) in ORDERS.iter().enumerate() {
             if ctx.len() < k {
                 continue;
             }
             let key = pack(&ctx[ctx.len() - k..]);
             let e = self.tables[ti].entry(key).or_default();
-            match e.iter_mut().find(|(b, _)| *b == byte_real) {
+            match e.iter_mut().find(|(b, _)| *b == real_byte) {
                 Some((_, c)) => *c += 1,
-                None => e.push((byte_real, 1)),
+                None => e.push((real_byte, 1)),
             }
         }
     }
 
-    /// Cuántas entradas tiene, para poder contar lo que "pesa" la tabla contra
-    /// lo que pesan los parámetros que reemplaza.
+    /// How many entries it has, to count what the table "weighs" against
+    /// what the parameters it replaces weigh.
     pub fn entries(&self) -> usize {
         self.tables.iter().map(|t| t.len()).sum()
     }
 
-    /// Bytes aproximados: clave de 8 + cada continuación de 5.
+    /// Approximate bytes: 8-byte key + 5 per continuation.
     pub fn bytes(&self) -> usize {
         self.tables
             .iter()
@@ -188,11 +192,11 @@ impl Recall {
     }
 }
 
-/// Mezcla la predicción del modelo con la de la tabla y devuelve la pérdida
-/// media en nats.
+/// Mixes the model's prediction with the table's and returns the mean loss
+/// in nats.
 ///
-/// `lambda = 0` es el modelo solo, que es la línea base contra la que se
-/// compara todo lo demás.
+/// `lambda = 0` is the model alone, which is the baseline everything else
+/// gets compared against.
 pub fn mixed_loss(
     logits: &[f32],
     vocab: usize,
@@ -200,12 +204,12 @@ pub fn mixed_loss(
     targets: &[usize],
     table: &Recall,
     lambda: f32,
-    cobertura: &mut (usize, usize),
+    coverage: &mut (usize, usize),
 ) -> f32 {
     let mut total = 0.0;
     for (t, &tgt) in targets.iter().enumerate() {
         let row = &logits[t * vocab..(t + 1) * vocab];
-        // softmax estable
+        // stable softmax
         let mx = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let mut sum = 0.0;
         let mut p = vec![0.0f32; vocab];
@@ -219,9 +223,8 @@ pub fn mixed_loss(
             *v *= inv;
         }
 
-        // El contexto de la tabla son los bytes REALES anteriores a esta
-        // posición, que es lo que tendría un generador en ese punto.
-        let hasta = ctx_before.len() + t;
+        // The table's context is the REAL bytes before this position, which
+        // is what a generator would have at that point.
         let ctx: Vec<usize> = if t == 0 {
             ctx_before.to_vec()
         } else {
@@ -229,21 +232,20 @@ pub fn mixed_loss(
             c.extend_from_slice(&targets[..t]);
             c
         };
-        let _ = hasta;
 
-        // Cobertura: cuántas veces la tabla tuvo algo que decir. Si es casi
-        // siempre, el corpus de prueba se parece demasiado al guardado y el
-        // resultado no se sostendría con texto nuevo.
-        cobertura.1 += 1;
+        // Coverage: how many times the table had something to say. If it's
+        // almost always, the test corpus is too similar to what was stored
+        // and the result wouldn't hold up on new text.
+        coverage.1 += 1;
         if let Some(q) = table.lookup(&ctx, vocab) {
-            cobertura.0 += 1;
+            coverage.0 += 1;
             if lambda > 0.0 {
                 for (pi, qi) in p.iter_mut().zip(&q) {
                     *pi = (1.0 - lambda) * *pi + lambda * qi;
                 }
             }
         }
-        // Piso para que un cero de la mezcla no dé infinito.
+        // Floor so a zero in the mix doesn't give infinity.
         total -= p[tgt].max(1e-9).ln();
     }
     total / targets.len() as f32
@@ -255,18 +257,18 @@ mod tests {
 
     #[test]
     fn the_table_remembers_what_it_saw() {
-        // "abcabcabc...": después de "abc" siempre viene 'a'.
+        // "abcabcabc...": after "abc" it's always 'a'.
         let train: Vec<usize> = "abcabcabcabcabcabcabcabc".bytes().map(|b| b as usize).collect();
         let r = Recall::build(&train);
         let ctx: Vec<usize> = "abcabcab".bytes().map(|b| b as usize).collect();
-        let p = r.lookup(&ctx, 256).expect("debería reconocer el contexto");
-        assert!(p['c' as usize] > 0.9, "esperaba 'c' y dio {:?}", p['c' as usize]);
+        let p = r.lookup(&ctx, 256).expect("should recognize the context");
+        assert!(p['c' as usize] > 0.9, "expected 'c' and got {:?}", p['c' as usize]);
     }
 
     #[test]
     fn it_stays_quiet_about_what_it_never_saw() {
-        // Una tabla que inventa es peor que una que calla: la mezcla se lleva
-        // la mentira a la predicción final.
+        // A table that makes things up is worse than one that stays quiet:
+        // the mix carries the lie into the final prediction.
         let train: Vec<usize> = "aaaaaaaaaaaaaaaa".bytes().map(|b| b as usize).collect();
         let r = Recall::build(&train);
         let ctx: Vec<usize> = "zzzzzzzz".bytes().map(|b| b as usize).collect();
@@ -275,50 +277,50 @@ mod tests {
 
     #[test]
     fn one_sighting_is_not_knowledge() {
-        // Un contexto visto una sola vez daría probabilidad 1 a un byte: es
-        // memorización, no distribución. MIN_COUNT lo filtra.
+        // A context seen only once would give probability 1 to a byte:
+        // that's memorization, not a distribution. MIN_COUNT filters it out.
         let train: Vec<usize> = "qwertyuiopasdfgh".bytes().map(|b| b as usize).collect();
         let r = Recall::build(&train);
         let ctx: Vec<usize> = "qwertyui".bytes().map(|b| b as usize).collect();
-        assert!(r.lookup(&ctx, 256).is_none(), "le creyó a una sola aparición");
+        assert!(r.lookup(&ctx, 256).is_none(), "trusted a single occurrence");
     }
 
     #[test]
     fn observe_is_a_vote_not_a_flag() {
-        // Un solo `observe` no alcanza -- sigue mudo, misma disciplina que
-        // MIN_COUNT en build(). Recién con el segundo voto contesta.
+        // A single `observe` isn't enough -- it stays quiet, same discipline
+        // as MIN_COUNT in build(). Only with the second vote does it answer.
         let train: Vec<usize> = "xyzxyzxyzxyz".bytes().map(|b| b as usize).collect();
         let mut r = Recall::build(&train);
         let ctx: Vec<usize> = "qqqqqqqq".bytes().map(|b| b as usize).collect();
-        assert!(r.lookup(&ctx, 256).is_none(), "no debería saber nada de este contexto todavía");
+        assert!(r.lookup(&ctx, 256).is_none(), "shouldn't know anything about this context yet");
         r.observe(&ctx, b'!');
-        assert!(r.lookup(&ctx, 256).is_none(), "un solo voto no es MIN_COUNT, sigue en silencio");
+        assert!(r.lookup(&ctx, 256).is_none(), "a single vote isn't MIN_COUNT, still silent");
         r.observe(&ctx, b'!');
-        let p = r.lookup(&ctx, 256).expect("con 2 votos ya debería contestar");
-        assert!(p['!' as usize] > 0.9, "esperaba '!' y dio {:?}", p['!' as usize]);
+        let p = r.lookup(&ctx, 256).expect("with 2 votes it should answer now");
+        assert!(p['!' as usize] > 0.9, "expected '!' and got {:?}", p['!' as usize]);
     }
 
     #[test]
     fn lambda_zero_is_exactly_the_model_alone() {
-        // La línea base tiene que salir del MISMO código que la mezcla, o se
-        // estarían comparando dos implementaciones distintas de softmax.
+        // The baseline has to come out of the SAME code as the mix, or two
+        // different softmax implementations would be getting compared.
         let train: Vec<usize> = "abcabcabcabc".bytes().map(|b| b as usize).collect();
         let r = Recall::build(&train);
         let vocab = 4;
         let logits = vec![0.1, 2.0, -1.0, 0.5, 1.0, 0.0, 0.0, 0.0];
         let targets = vec![1usize, 0];
-        let mut cob = (0, 0);
-        let con = mixed_loss(&logits, vocab, &[], &targets, &r, 0.0, &mut cob);
+        let mut cov = (0, 0);
+        let with = mixed_loss(&logits, vocab, &[], &targets, &r, 0.0, &mut cov);
 
-        // A mano: -log softmax en la posición del objetivo.
-        let mut esperado = 0.0;
+        // By hand: -log softmax at the target position.
+        let mut expected = 0.0;
         for (t, &tgt) in targets.iter().enumerate() {
             let row = &logits[t * vocab..(t + 1) * vocab];
             let mx = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
             let s: f32 = row.iter().map(|v| (v - mx).exp()).sum();
-            esperado -= ((row[tgt] - mx).exp() / s).ln();
+            expected -= ((row[tgt] - mx).exp() / s).ln();
         }
-        esperado /= targets.len() as f32;
-        assert!((con - esperado).abs() < 1e-5, "{con} != {esperado}");
+        expected /= targets.len() as f32;
+        assert!((with - expected).abs() < 1e-5, "{with} != {expected}");
     }
 }

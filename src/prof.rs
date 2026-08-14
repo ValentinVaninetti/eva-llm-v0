@@ -1,27 +1,28 @@
-//! Un cronómetro por etiqueta, para saber en qué se va el tiempo.
+//! A stopwatch per label, to know where the time goes.
 //!
-//! POR QUÉ EXISTE: dos veces en el mismo día la intuición eligió mal el cuello.
-//! Primero "hay que optimizar el shader" cuando eran los flags de memoria (el
-//! tiling dio 1.13x y el flag 2.5x), después "el cuello es ClockMem" a partir
-//! de evidencia indirecta. Adivinar sale caro y medir sale barato.
+//! WHY THIS EXISTS: twice in the same day, intuition picked the wrong
+//! bottleneck. First "the shader needs optimizing" when it was the memory
+//! flags (tiling gave 1.13x, the flag gave 2.5x), then "the bottleneck is
+//! ClockMem" based on indirect evidence. Guessing is expensive and
+//! measuring is cheap.
 //!
-//! No hay `perf` en esta máquina, así que esto: contadores atómicos por
-//! etiqueta, cero costo cuando está apagado, y un informe al final.
+//! There's no `perf` on this machine, so: atomic counters per label, zero
+//! cost when it's off, and a report at the end.
 //!
 //! ```text
 //! EVA_PROFILE=1 cargo run --release -- train --data ...
 //! ```
 //!
-//! Mide TIEMPO DE PARED acumulado, así que si algo corre en varios hilos suma
-//! más que el reloj. Es a propósito: lo que se busca es en qué se va el
-//! esfuerzo, no cuánto tardó la corrida.
+//! Measures accumulated WALL TIME, so if something runs on several threads
+//! it adds up to more than the clock. That's intentional: what we're after
+//! is where the effort goes, not how long the run took.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::Instant;
 
-/// Las etiquetas son fijas: un `HashMap` con lock en el camino caliente mide
-/// sobre todo el lock.
+/// The labels are fixed: a `HashMap` with a lock on the hot path would end
+/// up measuring the lock itself.
 #[derive(Clone, Copy)]
 pub enum P {
     Matmul,
@@ -36,8 +37,8 @@ impl P {
         (P::Matmul, "matmul"),
         (P::ClockFwd, "clockmem fwd"),
         (P::ClockBwd, "clockmem bwd"),
-        (P::Backward, "backward (todo)"),
-        (P::Optim, "optimizador"),
+        (P::Backward, "backward (all)"),
+        (P::Optim, "optimizer"),
     ];
 }
 
@@ -61,7 +62,8 @@ fn on() -> bool {
     *ON.get_or_init(|| std::env::var("EVA_PROFILE").is_ok())
 }
 
-/// Mide lo que dure `body`. Con el perfil apagado es una llamada y nada más.
+/// Times however long `body` takes. With profiling off it's just a call and
+/// nothing more.
 pub fn time<R>(p: P, body: impl FnOnce() -> R) -> R {
     if !on() {
         return body();
@@ -74,13 +76,14 @@ pub fn time<R>(p: P, body: impl FnOnce() -> R) -> R {
     r
 }
 
-/// Informe final. `wall` es lo que tardó de verdad, para poner los % en escala.
+/// Final report. `wall` is how long it actually took, to scale the
+/// percentages.
 pub fn report(wall: std::time::Duration) {
     if !on() {
         return;
     }
     let total = wall.as_secs_f64();
-    eprintln!("\n── en qué se fue el tiempo ──");
+    eprintln!("\n-- where the time went --");
     for (p, name) in P::ALL {
         let i = p as usize;
         let s = NANOS[i].load(Ordering::Relaxed) as f64 / 1e9;
@@ -89,10 +92,10 @@ pub fn report(wall: std::time::Duration) {
             continue;
         }
         eprintln!(
-            "  {name:<16} {s:8.2} s  {:5.1}%  ({n} llamadas, {:.1} µs c/u)",
+            "  {name:<16} {s:8.2} s  {:5.1}%  ({n} calls, {:.1} us each)",
             100.0 * s / total,
             s * 1e6 / n as f64,
         );
     }
-    eprintln!("  {:<16} {total:8.2} s", "reloj de pared");
+    eprintln!("  {:<16} {total:8.2} s", "wall clock");
 }

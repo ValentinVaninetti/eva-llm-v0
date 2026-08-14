@@ -145,14 +145,14 @@ pub fn transpose(x: &Tensor) -> Tensor {
     finalize(&[x], "transpose", out, vec![c, r], vec![], vec![], vec![r, c])
 }
 
-/// Softmax por fila sobre el prefijo causal: la fila `i` sólo ve las columnas
-/// `0..=i`, y el resto queda en cero.
+/// Row-wise softmax over the causal prefix: row `i` only sees columns
+/// `0..=i`, and the rest stays at zero.
 ///
-/// El enmascarado va ACÁ ADENTRO y no como un `-inf` sumado antes, por dos
-/// razones. Numérica: `exp(-inf)` en el borde da NaN apenas alguien resta el
-/// máximo. Y de costo: enmascarar afuera obliga a materializar una matriz SxS
-/// de `-inf` por capa y por paso, que es memoria y tráfico para representar
-/// "acá no mires".
+/// The masking happens IN HERE and not as a `-inf` added beforehand, for two
+/// reasons. Numerical: `exp(-inf)` at the edge gives NaN as soon as anyone
+/// subtracts the max. And cost: masking outside would force materializing an
+/// SxS matrix of `-inf` per layer and per step, which is memory and traffic
+/// just to represent "don't look here".
 pub fn softmax_causal(x: &Tensor) -> Tensor {
     assert_eq!(x.shape.len(), 2, "softmax_causal expects (S,S)");
     let (s, n) = (x.shape[0], x.shape[1]);
@@ -160,8 +160,8 @@ pub fn softmax_causal(x: &Tensor) -> Tensor {
     let mut out = vec![0.0; s * s];
     for i in 0..s {
         let row = &x.data[i * s..i * s + i + 1];
-        // Restar el máximo antes de exponenciar: sin esto, logits grandes
-        // desbordan a inf y la fila entera sale NaN.
+        // Subtract the max before exponentiating: without this, large
+        // logits overflow to inf and the whole row comes out NaN.
         let mx = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let mut sum = 0.0;
         for j in 0..=i {
@@ -177,17 +177,17 @@ pub fn softmax_causal(x: &Tensor) -> Tensor {
     finalize(&[x], "softmax_causal", out.clone(), x.shape.clone(), vec![std::sync::Arc::new(out)], vec![], vec![s])
 }
 
-/// Las primeras `n` filas de un tensor (S,D).
+/// The first `n` rows of a (S,D) tensor.
 ///
-/// Hace falta porque en generación la ventana crece de a un token y la tabla
-/// de posiciones es de largo fijo. Cortarla con `Tensor::new` parecía
-/// equivalente y no lo es: un tensor construido a mano no tiene nodo, así que
-/// el gradiente nunca vuelve y la tabla no aprende nada -- falla en silencio,
-/// entrenando un parámetro muerto.
+/// Needed because during generation the window grows one token at a time and
+/// the position table has a fixed length. Slicing it with `Tensor::new`
+/// looked equivalent and isn't: a hand-built tensor has no node, so the
+/// gradient never comes back and the table learns nothing -- it fails
+/// silently, training a dead parameter.
 pub fn slice_rows(x: &Tensor, n: usize) -> Tensor {
     assert_eq!(x.shape.len(), 2, "slice_rows expects (S,D)");
     let (s, d) = (x.shape[0], x.shape[1]);
-    assert!(n <= s, "slice_rows: {n} filas de un tensor de {s}");
+    assert!(n <= s, "slice_rows: {n} rows out of a tensor of {s}");
     finalize(&[x], "slice_rows", x.data[..n * d].to_vec(), vec![n, d], vec![], vec![], vec![s, d, n])
 }
 
@@ -201,15 +201,15 @@ pub fn sigmoid(x: &Tensor) -> Tensor {
     finalize(&[x], "sigmoid", out.clone(), x.shape.clone(), vec![std::sync::Arc::new(out)], vec![], vec![])
 }
 
-/// Squashing R->(0,1) con cola POLINÓMICA en vez de exponencial: la
-/// derivada decae como 1/|z|^3 (`sigmoid` decae como exp(-|z|)) -- mucha
-/// más señal sobrevive lejos del centro. Existe para la Ronda 4, hipótesis
-/// de GPT: si el achatamiento de `alpha` en ClockMem es saturación del
-/// sigmoid (medido: |grad| 20-100x más chico en la banda rápida) y no
-/// preferencia de la loss, esta op debería dejar que el gradiente siga
-/// llegando incluso con alpha cerca de 0.
+/// Squashing R->(0,1) with a POLYNOMIAL tail instead of an exponential one:
+/// the derivative decays as 1/|z|^3 (`sigmoid` decays as exp(-|z|)) -- much
+/// more signal survives far from the center. Exists for Round 4, GPT's
+/// hypothesis: if the flattening of `alpha` in ClockMem is sigmoid
+/// saturation (measured: |grad| 20-100x smaller in the fast band) and not a
+/// preference of the loss, this op should let gradient keep arriving even
+/// with alpha near 0.
 ///
-/// s(z) = 0.5·(1 + z/√(1+z²))  -- mismo dominio/rango que sigmoid.
+/// s(z) = 0.5*(1 + z/sqrt(1+z^2))  -- same domain/range as sigmoid.
 pub fn algebraic_sigmoid(x: &Tensor) -> Tensor {
     let out: Vec<f32> = x.data.iter().map(|&v| 0.5 * (1.0 + v / (1.0 + v * v).sqrt())).collect();
     finalize(&[x], "algebraic_sigmoid", out, x.shape.clone(), vec![x.data.clone()], vec![], vec![])
@@ -261,51 +261,52 @@ pub fn cross_entropy(logits: &Tensor, targets: &[usize]) -> Tensor {
     finalize(&[logits], "ce", vec![loss], vec![], vec![logits.data.clone()], vec![], targets.to_vec())
 }
 
-/// 8. QUE APUESTE — la cabeza de stake por tramo.
+/// 8. THAT IT BETS -- the per-span stake head.
 ///
-/// Una pérdida que lee el estado oculto AL ARRANCAR cada tramo de `span_len`
-/// posiciones, emite un stake `s = sigmoid(w·h + b)` y lo puntúa contra cuánto
-/// salió bien el tramo (`bien` = fracción de posiciones acertadas):
-/// `loss = mean (s - bien)²`.
+/// A loss that reads the hidden state AT THE START of each `span_len`-long
+/// span, emits a stake `s = sigmoid(w*h + b)`, and scores it against how well
+/// the span actually went (`good` = fraction of correct positions):
+/// `loss = mean (s - good)^2`.
 ///
-/// POR QUÉ ES ASÍ:
-/// - `hidden` entra detached desde el entrenamiento: la cabeza es una sonda
-///   sobre el estado del modelo, no le manda gradiente. Que el gradiente cruce
-///   es la decisión 4, más cara, y se mide recién si esta sonda gana.
-/// - `bien` no es diferenciable (es acierto de argmax), por eso entra como
-///   dato calculado afuera y vive en `saved_f`, igual que los targets de la CE.
-/// - `saved_v` guarda `hidden` y `w` por referencia (Arc): con el contrato
-///   nuevo guardar no copia el buffer.
+/// WHY IT'S BUILT THIS WAY:
+/// - `hidden` comes in detached from training: the head is a probe on the
+///   model's state, it doesn't send it gradient. Letting gradient cross that
+///   boundary is decision 4, which is more expensive, and only gets measured
+///   if this probe wins.
+/// - `good` isn't differentiable (it's argmax correctness), so it comes in
+///   as data computed outside and lives in `saved_f`, same as the CE targets.
+/// - `saved_v` holds `hidden` and `w` by reference (Arc): under the new
+///   contract, saving doesn't copy the buffer.
 pub fn stake_loss(
     hidden: &Tensor,
     w: &Tensor,
     b: &Tensor,
-    bien: &[f32],
+    good: &[f32],
     span_len: usize,
 ) -> Tensor {
     assert_eq!(hidden.shape.len(), 2, "stake_loss expects hidden (S,D)");
     assert_eq!(w.shape.len(), 1, "stake_loss expects w (D,)");
     let (s, d) = (hidden.shape[0], hidden.shape[1]);
-    assert_eq!(w.shape[0], d, "w no tiene D elementos");
+    assert_eq!(w.shape[0], d, "w doesn't have D elements");
     assert_eq!(b.shape.len(), 1, "stake_loss expects b (1,)");
-    assert_eq!(b.shape[0], 1, "b tiene que ser un escalar");
-    let k = bien.len();
+    assert_eq!(b.shape[0], 1, "b has to be a scalar");
+    let k = good.len();
     let mut loss = 0.0f32;
     let mut zs = vec![0.0f32; k];
-    for (kk, &bienk) in bien.iter().enumerate() {
+    for (kk, &good_k) in good.iter().enumerate() {
         let start = kk * span_len;
-        assert!(start + span_len <= s, "el tramo {kk} se sale de la ventana");
+        assert!(start + span_len <= s, "span {kk} goes past the end of the window");
         let mut z = b.data[0];
         for j in 0..d {
             z += w.data[j] * hidden.data[start * d + j];
         }
         zs[kk] = z;
         let sval = 1.0 / (1.0 + (-z).exp());
-        let e = sval - bienk;
+        let e = sval - good_k;
         loss += e * e;
     }
     loss /= k.max(1) as f32;
-    let mut sf = bien.to_vec();
+    let mut sf = good.to_vec();
     sf.extend_from_slice(&zs);
     finalize(
         &[hidden, w, b],
@@ -348,18 +349,19 @@ pub fn clockmem(
     clockmem_from(q, k, v, g, alpha, beta, &vec![0.0; d]).0
 }
 
-/// Igual, pero arrancando de un estado dado y devolviendo el estado final.
+/// Same thing, but starting from a given state and returning the final
+/// state.
 ///
-/// POR QUÉ EXISTE: el estado de ClockMem es de tamaño fijo y tiene su propio
-/// olvido por canal, así que **no hay ninguna razón técnica para reiniciarlo
-/// en cada ventana**. Reiniciar es una herencia del transformer, donde el
-/// contexto ES la ventana y no queda otra. Acá, dejarlo correr da memoria más
-/// allá de la ventana **sin un byte extra de costo**.
+/// WHY THIS EXISTS: ClockMem's state has a fixed size and its own per-channel
+/// forgetting, so **there's no technical reason to reset it on every
+/// window**. Resetting is a holdover from the transformer, where the context
+/// IS the window and there's no other option. Here, letting it keep running
+/// gives memory beyond the window **at no extra byte of cost**.
 ///
-/// `s0` entra como CONSTANTE: el gradiente no vuelve por ahí. Eso es
-/// truncated BPTT, y es a propósito -- propagar hacia atrás por todo el corpus
-/// significaría sostener el grafo de todo el corpus, que es exactamente lo que
-/// no se quiere.
+/// `s0` comes in as a CONSTANT: gradient doesn't flow back through it.
+/// That's truncated BPTT, and it's intentional -- backpropagating through the
+/// entire corpus would mean holding the graph of the entire corpus, which is
+/// exactly what we don't want.
 pub fn clockmem_from(
     q: &Tensor,
     k: &Tensor,

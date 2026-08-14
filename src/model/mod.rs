@@ -8,14 +8,14 @@ use crate::rng::Rng;
 use crate::tensor::ops as ops;
 use crate::tensor::Tensor;
 
-/// Qué mezcla la información entre posiciones. Es la única diferencia entre
-/// las dos arquitecturas que sabe construir este archivo.
+/// What mixes information across positions. It's the only difference between
+/// the two architectures this file knows how to build.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Arch {
-    /// EvaClock: estado recurrente de D con reloj por canal. O(S·D).
+    /// EvaClock: D-sized recurrent state with a per-channel clock. O(S*D).
     Clock,
-    /// Atención causal de una cabeza. O(S²). Está para comparar, no es la
-    /// dirección del proyecto.
+    /// Single-head causal attention. O(S^2). It's there to compare against,
+    /// not the direction of the project.
     Attn,
 }
 
@@ -24,7 +24,7 @@ impl Arch {
         match s {
             "clock" => Ok(Arch::Clock),
             "attn" | "attention" | "transformer" => Ok(Arch::Attn),
-            other => Err(format!("arquitectura desconocida: '{other}' (clock o attn)")),
+            other => Err(format!("unknown architecture: '{other}' (clock or attn)")),
         }
     }
 
@@ -77,16 +77,16 @@ impl Default for EvaConfig {
 pub struct EvaModel {
     pub cfg: EvaConfig,
     pub embed: Embedding,
-    /// Posiciones absolutas aprendidas, SÓLO para la atención.
+    /// Learned absolute positions, ONLY for attention.
     ///
-    /// ClockMem codifica la posición gratis en el decaimiento `α^(t-i)`: la
-    /// cercanía está adentro del mecanismo. La atención sin esto no distingue
-    /// orden, sólo contenido, y compararlas así es ganarle a un rival con una
-    /// mano atada.
+    /// ClockMem encodes position for free in the decay `alpha^(t-i)`:
+    /// closeness lives inside the mechanism itself. Attention without this
+    /// doesn't distinguish order, only content, and comparing them that way
+    /// would mean beating a rival with one hand tied behind its back.
     ///
-    /// Le suma seq_len*dim (16 K de 2.77 M, 0.6%) que ClockMem no tiene. La
-    /// desventaja queda de nuestro lado a propósito: si igual gana ClockMem,
-    /// el resultado vale más.
+    /// This adds seq_len*dim (16K out of 2.77M, 0.6%) that ClockMem doesn't
+    /// have. The disadvantage is deliberately on our side: if ClockMem still
+    /// wins, the result is worth more.
     pub pos: Option<Tensor>,
     pub blocks: Vec<EvaBlock>,
     pub norm_out: RMSNorm,
@@ -123,26 +123,28 @@ impl EvaModel {
         logits
     }
 
-    /// Igual que `forward`, pero además devuelve el estado oculto ANTES de la
-    /// RMSNorm de salida.
+    /// Same as `forward`, but also returns the hidden state BEFORE the
+    /// output RMSNorm.
     ///
-    /// La magnitud de ese vector es la señal del 4 (el largo como confianza).
-    /// Se mide pre-norma a propósito: la RMSNorm aplana el largo por
-    /// construcción (el punto entero de la decisión 4 es que esa información
-    /// se tira), así que medirla post-norma sería medir ruido.
+    /// The magnitude of that vector is signal #4 (length as confidence).
+    /// It's measured pre-norm on purpose: RMSNorm flattens length by
+    /// construction (the entire point of decision 4 is that this
+    /// information gets thrown away), so measuring it post-norm would be
+    /// measuring noise.
     pub fn forward_hidden(&self, ids: &[usize]) -> (Tensor, Tensor) {
         self.forward_skip(ids, None)
     }
 
-    /// Igual que `forward_hidden`, pero con la opción de OMITIR un bloque: la
-    /// señal que usa el benchmark `techo` (el techo retrospectivo del cómputo
-    /// por influencia).
+    /// Same as `forward_hidden`, but with the option to SKIP a block: the
+    /// signal used by the `ceiling` benchmark (the retrospective compute
+    /// ceiling via influence).
     ///
-    /// `skip = None` es exactamente `forward_hidden`. `skip = Some(i)` deja
-    /// pasar la corriente residual por el bloque i como identidad: lo que el
-    /// modelo pierde así es lo que ese bloque aporta. Vive en el modelo y no
-    /// en el benchmark a propósito: la lógica del bloque se define una sola
-    /// vez, en su `forward`, y esto sólo decide si se llama.
+    /// `skip = None` is exactly `forward_hidden`. `skip = Some(i)` lets the
+    /// residual stream pass through block i as identity: whatever the model
+    /// loses that way is what that block contributes. This lives in the
+    /// model and not in the benchmark on purpose: the block's logic is
+    /// defined exactly once, in its `forward`, and this only decides
+    /// whether it gets called.
     pub fn forward_skip(&self, ids: &[usize], skip: Option<usize>) -> (Tensor, Tensor) {
         match skip {
             Some(i) => self.forward_skips(ids, &[i]),
@@ -150,14 +152,14 @@ impl EvaModel {
         }
     }
 
-    /// Variante experimental de `forward_hidden` que omite varios bloques.
-    /// Sólo la usa `techo` para medir una combinación REAL en una pasada;
-    /// no es una política de inferencia ni cambia el camino normal.
+    /// Experimental variant of `forward_hidden` that skips several blocks.
+    /// Only `ceiling` uses it, to measure a REAL combination in one pass;
+    /// it's not an inference policy and doesn't change the normal path.
     pub fn forward_skips(&self, ids: &[usize], skips: &[usize]) -> (Tensor, Tensor) {
         let mut x = self.embed.embed(ids);
         if let Some(pos) = &self.pos {
-            // En generación la ventana crece de a un token, así que el corte
-            // no es decorativo.
+            // During generation the window grows one token at a time, so
+            // the cut isn't decorative.
             let n = ids.len().min(self.cfg.seq_len);
             x = ops::add(&x, &ops::slice_rows(pos, n));
         }
@@ -173,11 +175,12 @@ impl EvaModel {
         (logits, hidden)
     }
 
-    /// Pasada llevando el estado de ClockMem de una ventana a la siguiente.
+    /// A pass that carries ClockMem's state from one window to the next.
     ///
-    /// `states` entra con lo que dejó la ventana anterior y sale con lo que le
-    /// deja a la próxima. Son D números por bloque, de tamaño fijo: por eso
-    /// esto es gratis y un caché de atención no lo sería.
+    /// `states` comes in with what the previous window left behind and goes
+    /// out with what it leaves for the next one. It's D numbers per block,
+    /// fixed size: that's why this is free and an attention cache wouldn't
+    /// be.
     pub fn forward_carrying(&self, ids: &[usize], states: &mut [Vec<f32>]) -> Tensor {
         let mut x = self.embed.embed(ids);
         if let Some(pos) = &self.pos {
@@ -195,7 +198,7 @@ impl EvaModel {
         ops::matmul(&x, &self.head_w)
     }
 
-    /// Estados en cero, uno por bloque.
+    /// Zeroed states, one per block.
     pub fn fresh_states(&self) -> Vec<Vec<f32>> {
         vec![vec![0.0; self.cfg.dim]; self.blocks.len()]
     }

@@ -34,7 +34,7 @@ impl TextDataset {
         (input, target)
     }
 
-    /// Baraja SÓLO las primeras `n`: las de atrás son el examen.
+    /// Shuffles ONLY the first `n`: the ones after that are the exam.
     pub fn shuffled_train_indices(&self, n: usize, rng: &mut Rng) -> Vec<usize> {
         let mut idx: Vec<usize> = (0..n).collect();
         rng.shuffle(&mut idx);

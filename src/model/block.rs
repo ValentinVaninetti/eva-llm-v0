@@ -6,18 +6,19 @@ use crate::rng::Rng;
 use crate::tensor::ops as ops;
 use crate::tensor::Tensor;
 
-/// Los dos mezcladores posibles. La comparación entre ellos es el experimento
-/// central del proyecto, así que viven al mismo nivel y con la misma interfaz.
+/// The two possible mixers. The comparison between them is the project's
+/// central experiment, so they live at the same level and behind the same
+/// interface.
 pub enum Mixer {
     Clock(ClockMem),
     Attn(Attention),
 }
 
 impl Mixer {
-    /// Devuelve el estado final sólo si el mezclador tiene estado de tamaño
-    /// fijo. La atención devuelve `None` a propósito: su "estado" es un caché
-    /// que crece con el contexto, así que encadenarlo entre ventanas no sería
-    /// gratis y la comparación dejaría de ser justa.
+    /// Returns the final state only if the mixer has fixed-size state.
+    /// Attention returns `None` on purpose: its "state" is a cache that
+    /// grows with context, so chaining it across windows wouldn't be free
+    /// and the comparison would stop being fair.
     pub fn forward_from(&self, x: &Tensor, s0: Option<&[f32]>) -> (Tensor, Option<Vec<f32>>) {
         match (self, s0) {
             (Mixer::Clock(m), Some(s)) => {
@@ -66,15 +67,16 @@ pub struct EvaBlock {
     pub norm0: RMSNorm,
     pub conv: DepthwiseConv1d,
     pub norm1: RMSNorm,
-    /// El mezclador temporal, que es LA variable del experimento. Todo lo
-    /// demás del bloque es idéntico entre arquitecturas a propósito: si
-    /// cambiara algo más, la comparación no diría cuál de los dos cambios fue.
+    /// The temporal mixer, which is THE variable of the experiment.
+    /// Everything else in the block is deliberately identical between
+    /// architectures: if anything else changed too, the comparison wouldn't
+    /// tell you which of the two changes actually mattered.
     ///
-    /// Enum y no `Box<dyn Module>`: la inferencia con estado necesita saber
-    /// CUÁL es para llevar el estado que corresponde --un vector fijo de D
-    /// para ClockMem, un caché que crece para la atención-- y eso no se puede
-    /// preguntar a través de un objeto de trait. De paso saca el despacho
-    /// dinámico del camino caliente.
+    /// An enum and not `Box<dyn Module>`: stateful inference needs to know
+    /// WHICH ONE it is in order to carry the matching state --a fixed
+    /// D-sized vector for ClockMem, a growing cache for attention-- and that
+    /// can't be asked through a trait object. As a side effect it also keeps
+    /// dynamic dispatch off the hot path.
     pub mixer: Mixer,
     pub norm2: RMSNorm,
     pub glu: GLUFFN,

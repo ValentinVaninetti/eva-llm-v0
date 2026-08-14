@@ -10,14 +10,15 @@ pub struct Input {
 }
 
 impl Node {
-    /// Bytes que este nodo sostiene **de verdad**.
+    /// Bytes this node **actually** holds.
     ///
-    /// Un buffer compartido no cuenta: si alguien más lo tiene vivo --y para
-    /// los pesos ese alguien es el modelo-- guardarlo acá no reserva un byte.
-    /// Contar por largo, como hacía la primera versión de este medidor, daba
-    /// exactamente el mismo número antes y después de dejar de clonar. El
-    /// instrumento no veía el cambio que estaba hecho para medir.
-    fn peso_propio(&self) -> usize {
+    /// A shared buffer doesn't count: if someone else keeps it alive --and
+    /// for the weights that someone is the model-- holding it here doesn't
+    /// reserve a single byte. Counting by length, like the first version of
+    /// this meter did, gave the exact same number before and after we
+    /// stopped cloning. The instrument couldn't see the change it was built
+    /// to measure.
+    fn own_weight(&self) -> usize {
         self.saved_v
             .iter()
             .filter(|v| std::sync::Arc::strong_count(v) == 1)
@@ -30,10 +31,11 @@ impl Node {
 
 impl Drop for Node {
     fn drop(&mut self) {
-        // El peso se calculó al crear y viaja con el nodo: recalcularlo acá
-        // daría distinto si alguien clonó el Arc mientras tanto, y el contador
-        // quedaría descompensado.
-        crate::tensor::held::sale(self.peso_guardado);
+        // The weight was computed at creation and travels with the node:
+        // recomputing it here would give a different result if someone
+        // cloned the Arc in the meantime, and the counter would end up
+        // unbalanced.
+        crate::tensor::held::leave(self.held_weight);
     }
 }
 
@@ -41,20 +43,20 @@ pub struct Node {
     pub op: &'static str,
     pub inputs: Vec<Input>,
     pub grad_flags: Vec<bool>,
-    /// Lo que el backward necesita de la pasada hacia adelante.
+    /// What backward needs from the forward pass.
     ///
-    /// `Arc` y no `Vec`: guardar la entrada de una operación era **copiar el
-    /// buffer**. Para `x @ W` eso significaba clonar la matriz de pesos, que ya
-    /// está viva en el modelo. Medido: el 83% de lo que guardaba `matmul` eran
-    /// pesos duplicados, y `matmul` es el 65% del grafo. Ahora guardar es subir
-    /// un contador.
+    /// `Arc` and not `Vec`: saving the input of an operation used to mean
+    /// **copying the buffer**. For `x @ W` that meant cloning the weight
+    /// matrix, which is already alive in the model. Measured: 83% of what
+    /// `matmul` was saving was duplicated weights, and `matmul` is 65% of
+    /// the graph. Now saving just means bumping a counter.
     pub saved_v: Vec<std::sync::Arc<Vec<f32>>>,
     pub saved_f: Vec<f32>,
     pub saved_u: Vec<usize>,
     pub out_id: usize,
     pub out_len: usize,
-    /// Lo que este nodo reserva de verdad, fijado al crearlo.
-    peso_guardado: usize,
+    /// What this node actually reserves, fixed at creation time.
+    held_weight: usize,
 }
 
 pub fn make_node(
@@ -73,10 +75,10 @@ pub fn make_node(
         .collect();
     let mut n = Node {
         op, inputs, grad_flags, saved_v, saved_f, saved_u, out_id, out_len,
-        peso_guardado: 0,
+        held_weight: 0,
     };
-    n.peso_guardado = n.peso_propio();
-    crate::tensor::held::entra(op, n.peso_guardado);
+    n.held_weight = n.own_weight();
+    crate::tensor::held::enter(op, n.held_weight);
     Arc::new(n)
 }
 
@@ -123,24 +125,25 @@ fn visit(node: Arc<Node>, topo: &mut Vec<Arc<Node>>, visited: &mut HashSet<usize
     topo.push(node);
 }
 
-/// Dimensiones que se manejan sin tocar el heap. Los tensores de este modelo
-/// tienen entre 1 y 3; ocho da margen de sobra.
+/// Dimensions handled without touching the heap. The tensors in this model
+/// have between 1 and 3; eight leaves plenty of headroom.
 const MAX_DIMS: usize = 8;
 
-/// Recorre la salida entregando `(índice de salida, índice de origen)`.
+/// Walks the output, handing back `(output index, source index)`.
 ///
-/// SIN ASIGNAR NADA, que es todo el punto. La versión anterior llamaba por cada
-/// elemento a `index_to_coords`, que devolvía un `Vec`, y armaba otro `Vec` de
-/// coordenadas al lado: **dos allocations por número**. Para un tensor de
-/// 64x1024 son 131 mil allocations en UNA llamada, y esto se llama en el
-/// backward de `add` y de `mul`, que es donde estaba casi la mitad del tiempo.
+/// WITHOUT ALLOCATING ANYTHING, which is the whole point. The previous
+/// version called `index_to_coords` for every element, which returned a
+/// `Vec`, and then built another coordinate `Vec` alongside it: **two
+/// allocations per number**. For a 64x1024 tensor that's 131 thousand
+/// allocations in ONE call, and this gets called in the backward of `add`
+/// and `mul`, which is where almost half the time was going.
 ///
-/// El índice de origen se lleva con un odómetro: la dimensión que se difunde
-/// tiene paso 0, que es exactamente lo que significa repetir un valor.
+/// The source index is tracked with an odometer: the dimension being
+/// broadcast has stride 0, which is exactly what repeating a value means.
 ///
-/// Devuelve `false` si las formas no son compatibles, y **eso se decide una
-/// sola vez**: el chequeo viejo estaba adentro del lazo pero sólo dependía de
-/// las formas, así que daba lo mismo para los millones de elementos.
+/// Returns `false` if the shapes aren't compatible, and **that's decided
+/// only once**: the old check was inside the loop but only depended on the
+/// shapes, so it gave the same answer for millions of elements.
 fn walk(out_shape: &[usize], src_shape: &[usize], mut visit: impl FnMut(usize, usize)) -> bool {
     let nd = out_shape.len();
     if nd > MAX_DIMS || src_shape.len() > nd {
@@ -171,7 +174,7 @@ fn walk(out_shape: &[usize], src_shape: &[usize], mut visit: impl FnMut(usize, u
             if coord[d] < out_shape[d] {
                 break;
             }
-            // Se dio la vuelta: descontar lo que sumó el ciclo entero.
+            // Wrapped around: subtract what the full cycle added.
             src -= step[d] * out_shape[d];
             coord[d] = 0;
         }
@@ -184,7 +187,7 @@ fn broadcast_to(x: &[f32], xshape: &[usize], oshape: &[usize]) -> Vec<f32> {
         return x.to_vec();
     }
     let mut out = vec![0.0; oshape.iter().product()];
-    // Con formas incompatibles queda todo en cero, igual que antes.
+    // Incompatible shapes leave everything at zero, same as before.
     walk(oshape, xshape, |o, s| out[o] = x[s]);
     out
 }
@@ -282,8 +285,8 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
         }
         "transpose" => {
             let (r, c) = (n.saved_u[0], n.saved_u[1]);
-            // La transpuesta es su propia inversa: el gradiente vuelve dado
-            // vuelta y nada más.
+            // Transpose is its own inverse: the gradient just comes back
+            // flipped and nothing else.
             push(0, crate::math::transpose(g, c, r));
         }
         "softmax_causal" => {
@@ -291,8 +294,8 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
             let y = &n.saved_v[0];
             let mut gx = vec![0.0; s * s];
             for i in 0..s {
-                // dL/dx_j = y_j * (g_j - Σ_k g_k y_k), con la suma sólo sobre
-                // lo que la fila realmente mira.
+                // dL/dx_j = y_j * (g_j - Sum_k g_k y_k), with the sum only
+                // over what the row actually looks at.
                 let mut dot = 0.0;
                 for j in 0..=i {
                     dot += g[i * s + j] * y[i * s + j];
@@ -305,7 +308,7 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
         }
         "slice_rows" => {
             let (s, d, n) = (n_su(n, 0), n_su(n, 1), n_su(n, 2));
-            // Lo que no se cortó no recibió nada: cero.
+            // Whatever wasn't sliced got nothing: zero.
             let mut gx = vec![0.0; s * d];
             gx[..n * d].copy_from_slice(&g[..n * d]);
             push(0, gx);
@@ -453,10 +456,11 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
                     gs[c] += go * q[t * d + c] * gg[t * d + c];
                 }
                 for c in 0..d {
-                    // En t=0 el estado previo es el que vino de la ventana
-                    // anterior, no cero. Si esto quedara en 0.0 con estado
-                    // persistente, el gradiente de alpha sería incorrecto
-                    // justo en el borde entre ventanas -- y no fallaría nada.
+                    // At t=0 the previous state is whatever the previous
+                    // window left behind, not zero. If this stayed at 0.0
+                    // with persistent state, alpha's gradient would be
+                    // wrong right at the window boundary -- and nothing
+                    // would fail loudly.
                     let prev_state = if t == 0 { s0[c] } else { state[(t - 1) * d + c] };
                     ga[c] += gs[c] * prev_state;
                     gb += gs[c] * k[t * d + c] * v[t * d + c];
@@ -483,19 +487,20 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
             }
         }
         "stake_loss" => {
-            // saved_v = [hidden, w], saved_f = [bien (K), z (K)], saved_u =
-            // [span_len, K, S]. La pérdida es mean_k (s_k - bien_k)² con
-            // s_k = sigmoid(z_k), así que cada tramo aporta
-            //   d/dz_k = g[0] * 2/K * (s_k - bien_k) * s_k * (1 - s_k)
-            // y de ahí se distribuye a w (Σ_k d_k·h_k), b (Σ_k d_k) y a la
-            // fila del estado oculto que arranca el tramo (d_k·w).
+            // saved_v = [hidden, w], saved_f = [good (K), z (K)], saved_u =
+            // [span_len, K, S]. The loss is mean_k (s_k - good_k)^2 with
+            // s_k = sigmoid(z_k), so each span contributes
+            //   d/dz_k = g[0] * 2/K * (s_k - good_k) * s_k * (1 - s_k)
+            // and from there it's distributed to w (Sum_k d_k*h_k), b
+            // (Sum_k d_k), and the hidden-state row that starts the span
+            // (d_k*w).
             let hidden = &n.saved_v[0];
             let w = &n.saved_v[1];
             let span_len = n.saved_u[0];
             let k = n.saved_u[1];
             let s = n.saved_u[2];
             let d = hidden.len() / s;
-            let bien = &n.saved_f[..k];
+            let good = &n.saved_f[..k];
             let zs = &n.saved_f[k..];
             let scale = g[0] * 2.0 / k.max(1) as f32;
             let mut gh = vec![0.0; hidden.len()];
@@ -503,7 +508,7 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
             let mut gb = 0.0;
             for (kk, &zk) in zs.iter().enumerate() {
                 let sig = 1.0 / (1.0 + (-zk).exp());
-                let der = scale * (sig - bien[kk]) * sig * (1.0 - sig);
+                let der = scale * (sig - good[kk]) * sig * (1.0 - sig);
                 let start = kk * span_len;
                 for j in 0..d {
                     gh[start * d + j] += der * w[j];

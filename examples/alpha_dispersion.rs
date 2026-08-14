@@ -1,81 +1,85 @@
-//! Número gratis ofrecido a GPT/Dante: ¿los `alpha` de ClockMem (el olvido
-//! por canal) muestran una jerarquía temporal real después de entrenar, o
-//! convergen todos parecidos? Sólo lectura de un checkpoint ya entrenado --
-//! cero código nuevo, cero entrenamiento.
+//! Free number offered to GPT/Dante: do ClockMem's `alpha`s (the
+//! per-channel forgetting) show a real temporal hierarchy after training,
+//! or do they all converge to something similar? Just reading an
+//! already-trained checkpoint -- zero new code, zero training.
 //!
-//! CORRECCIÓN IMPORTANTE a como se planteó la pregunta: la dispersión NO es
-//! algo que "emergería" de la nada. `ClockMem::new` (src/model/clock.rs)
-//! siembra `log_clock` con un espectro geométrico DISEÑADO a propósito, de
-//! alpha≈0.01 (canal rápido) a alpha≈0.9999 (canal lento) -- así que hay
-//! jerarquía por INICIALIZACIÓN, no por descubrimiento. La pregunta
-//! honesta y falsable no es "¿aparece jerarquía?" (ya está puesta), es:
-//! **¿el entrenamiento la CONSERVA (o la afila), o la ACHATA hacia un valor
-//! único, tirando el diseño inicial?** Si se achata, el gradiente está
-//! diciendo que la jerarquía de escalas no aportaba. Si se conserva o se
-//! afila, el modelo la está usando de verdad.
+//! IMPORTANT CORRECTION to how the question was originally framed:
+//! dispersion is NOT something that would "emerge" from nothing.
+//! `ClockMem::new` (src/model/clock.rs) seeds `log_clock` with a
+//! geometric spectrum DESIGNED on purpose, from alpha~=0.01 (fast channel)
+//! to alpha~=0.9999 (slow channel) -- so there's hierarchy by
+//! INITIALIZATION, not by discovery. The honest, falsifiable question
+//! isn't "does hierarchy show up?" (it's already there), it's: **does
+//! training PRESERVE it (or sharpen it), or does it FLATTEN it toward a
+//! single value, throwing away the initial design?** If it flattens, the
+//! gradient is saying the hierarchy of scales wasn't contributing. If it's
+//! preserved or sharpened, the model is really using it.
 
 use eva_llm_v0::model::block::Mixer;
 use eva_llm_v0::save::load_model;
 
 fn main() {
     let weights = std::env::args().nth(1).unwrap_or_else(|| "16m5b_seed7.weights".into());
-    let model = load_model(&weights).expect("no pude cargar el checkpoint");
+    let model = load_model(&weights).expect("could not load the checkpoint");
 
-    println!("eva alpha_dispersion: {} bloques, dim {}\n", model.blocks.len(), model.cfg.dim);
+    println!("eva alpha_dispersion: {} blocks, dim {}\n", model.blocks.len(), model.cfg.dim);
 
     for (bi, block) in model.blocks.iter().enumerate() {
         let Mixer::Clock(clock) = &block.mixer else {
-            println!("bloque {bi}: no es ClockMem (arch distinta), salteado");
+            println!("block {bi}: not ClockMem (different arch), skipped");
             continue;
         };
-        // alpha = squash(log_clock), igual que en forward() -- respeta
-        // EVA_ALPHA_ANTISAT porque el checkpoint pudo entrenarse con
-        // algebraic_sigmoid en vez de sigmoid (Ronda 4, hipótesis de GPT).
+        // alpha = squash(log_clock), same as in forward() -- respects
+        // EVA_ALPHA_ANTISAT because the checkpoint might have trained with
+        // algebraic_sigmoid instead of sigmoid (Round 4, GPT's hypothesis).
         let antisat = std::env::var("EVA_ALPHA_ANTISAT").is_ok();
         let alphas: Vec<f32> = clock.log_clock.data.iter().map(|&lc| {
             if antisat { 0.5 * (1.0 + lc / (1.0 + lc * lc).sqrt()) } else { 1.0 / (1.0 + (-lc).exp()) }
         }).collect();
-        let mut ordenado = alphas.clone();
-        ordenado.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let n = ordenado.len();
-        let media = alphas.iter().sum::<f32>() / n as f32;
-        let var = alphas.iter().map(|a| (a - media).powi(2)).sum::<f32>() / n as f32;
-        let desvio = var.sqrt();
+        let mut sorted = alphas.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let n = sorted.len();
+        let mean = alphas.iter().sum::<f32>() / n as f32;
+        let var = alphas.iter().map(|a| (a - mean).powi(2)).sum::<f32>() / n as f32;
+        let stdev = var.sqrt();
 
-        // memoria efectiva ~ 1/(1-alpha) tokens (aprox. de la serie geométrica).
-        let mem_ef = |a: f32| 1.0 / (1.0 - a).max(1e-6);
+        // effective memory ~ 1/(1-alpha) tokens (approx. from the geometric series).
+        let eff_mem = |a: f32| 1.0 / (1.0 - a).max(1e-6);
 
-        println!("=== bloque {bi} ===");
-        println!("  alpha: min {:.4} (mem~{:.0} tok)  p25 {:.4}  mediana {:.4}  p75 {:.4}  max {:.4} (mem~{:.0} tok)",
-            ordenado[0], mem_ef(ordenado[0]),
-            ordenado[n / 4],
-            ordenado[n / 2],
-            ordenado[3 * n / 4],
-            ordenado[n - 1], mem_ef(ordenado[n - 1]));
-        println!("  media {media:.4}  desvío estándar {desvio:.4}  (init geométrico teórico: alpha_min=0.01, alpha_max=0.9999)");
+        println!("=== block {bi} ===");
+        println!("  alpha: min {:.4} (mem~{:.0} tok)  p25 {:.4}  median {:.4}  p75 {:.4}  max {:.4} (mem~{:.0} tok)",
+            sorted[0], eff_mem(sorted[0]),
+            sorted[n / 4],
+            sorted[n / 2],
+            sorted[3 * n / 4],
+            sorted[n - 1], eff_mem(sorted[n - 1]));
+        println!("  mean {mean:.4}  std dev {stdev:.4}  (theoretical geometric init: alpha_min=0.01, alpha_max=0.9999)");
 
-        // Reparto por banda de memoria efectiva, para ver si sobrevive una
-        // jerarquía de verdad (rápido/medio/lento) o si colapsa a una banda.
-        let bandas = [
-            ("rápido (mem<10 tok)", 0.0f32, 0.9f32),
-            ("medio (10-100 tok)", 0.9, 0.99),
-            ("lento (100-1000 tok)", 0.99, 0.999),
-            ("muy lento (>1000 tok)", 0.999, 1.0),
+        // Breakdown by effective-memory band, to see whether a real
+        // hierarchy (fast/medium/slow) survives or it collapses into one
+        // band.
+        let bands = [
+            ("fast (mem<10 tok)", 0.0f32, 0.9f32),
+            ("medium (10-100 tok)", 0.9, 0.99),
+            ("slow (100-1000 tok)", 0.99, 0.999),
+            ("very slow (>1000 tok)", 0.999, 1.0),
         ];
-        print!("  reparto por banda:");
-        for (nombre, lo, hi) in bandas {
+        print!("  breakdown by band:");
+        for (name, lo, hi) in bands {
             let c = alphas.iter().filter(|&&a| a >= lo && a < hi).count();
-            print!("  {nombre}={c}({:.0}%)", 100.0 * c as f32 / n as f32);
+            print!("  {name}={c}({:.0}%)", 100.0 * c as f32 / n as f32);
         }
         println!("\n");
     }
 
-    println!("=== VEREDICTO ===");
-    println!("  Si el desvío estándar es chico (canales convergieron parecido) y casi");
-    println!("  todo cae en una sola banda: el entrenamiento ACHATÓ el espectro inicial --");
-    println!("  la jerarquía de escalas no se sostuvo como útil, a esta escala/corpus.");
-    println!("  Si el desvío es grande y hay masa real en varias bandas: la jerarquía");
-    println!("  sobrevivió (o se afiló) -- el modelo SÍ está usando escalas temporales");
-    println!("  distintas por canal, y ahí es donde seguiría la pregunta de GPT (¿esa");
-    println!("  historia acumulada aporta algo que el estado \"actual\" solo no daría?).");
+    println!("=== VERDICT ===");
+    println!("  If the standard deviation is small (channels converged to something");
+    println!("  similar) and almost everything falls in a single band: training");
+    println!("  FLATTENED the initial spectrum -- the hierarchy of scales did not");
+    println!("  hold up as useful, at this scale/corpus.");
+    println!("  If the deviation is large and there's real mass across several");
+    println!("  bands: the hierarchy survived (or sharpened) -- the model IS using");
+    println!("  different time scales per channel, and that's where GPT's question");
+    println!("  would continue (does that accumulated history add something a");
+    println!("  \"current\" state alone wouldn't give?).");
 }

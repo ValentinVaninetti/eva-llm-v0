@@ -3,37 +3,37 @@ use crate::rng::Rng;
 use crate::tensor::ops as ops;
 use crate::tensor::Tensor;
 
-/// Ronda 4, hipótesis de GPT: ¿el achatamiento de `alpha` es saturación
-/// del sigmoid (medido: |grad| 20-100x más chico donde alpha≈0), no
-/// preferencia de la loss? Con esto activo, ClockMem usa
-/// `ops::algebraic_sigmoid` (cola polinómica) en vez de `ops::sigmoid`
-/// (cola exponencial) para todo lo demás idéntico -- misma arquitectura,
-/// mismo rango de `alpha`, mismo `EVA_ALPHA_MAX`, sólo cambia cuánta
-/// señal de gradiente sobrevive cerca de los extremos.
+/// Round 4, GPT's hypothesis: is the flattening of `alpha` sigmoid
+/// saturation (measured: |grad| 20-100x smaller where alpha≈0), not a
+/// preference of the loss? With this on, ClockMem uses
+/// `ops::algebraic_sigmoid` (polynomial tail) instead of `ops::sigmoid`
+/// (exponential tail), with everything else identical -- same
+/// architecture, same `alpha` range, same `EVA_ALPHA_MAX`, the only thing
+/// that changes is how much gradient signal survives near the extremes.
 fn antisat() -> bool {
     std::env::var("EVA_ALPHA_ANTISAT").is_ok()
 }
 
-/// Ronda 4, segunda intervención (a pedido de GPT, tras encontrar que
-/// `algebraic_sigmoid` no tocaba la región correcta): temperatura sobre
-/// EL MISMO sigmoid, `alpha=sigmoid(z/T)` con T>1. A diferencia de
-/// `algebraic_sigmoid`, esto NO cambia la forma de la curva -- estira el
-/// mismo sigmoid, así que a un `z` dado (el mismo que ya tenía cualquier
-/// canal) le corresponde MÁS derivada, verificado con script antes de
-/// tocar código: en z=-3..-5 (donde vive la banda rápida hoy), T=1.3 da
-/// ~1.4x-2.4x más derivada que T=1. Elegí T=1.3 explícitamente para eso,
-/// no un valor redondo porque sí.
+/// Round 4, second intervention (requested by GPT, after finding that
+/// `algebraic_sigmoid` wasn't touching the right region): temperature on
+/// THE SAME sigmoid, `alpha=sigmoid(z/T)` with T>1. Unlike
+/// `algebraic_sigmoid`, this does NOT change the shape of the curve -- it
+/// stretches the same sigmoid, so a given `z` (the same one any channel
+/// already had) ends up with MORE derivative, verified with a script before
+/// touching the code: at z=-3..-5 (where the fast band lives today), T=1.3
+/// gives ~1.4x-2.4x more derivative than T=1. I chose T=1.3 explicitly for
+/// that reason, not as an arbitrary round number.
 ///
-/// TRADE-OFF explícito, no escondido: para que "sólo cambie T" sea
-/// literal en el código (mismos valores de `log_clock` al arrancar, cero
-/// cambio en la inicialización), el `alpha` INICIAL se corre un poco
-/// (menos extremo -- con T=1.3, alpha=0.018 al init pasa a ≈0.044). No
-/// hay forma de tener EXACTAMENTE el mismo alpha inicial Y más derivada
-/// ahí a la vez con una sola familia de reparametrización (es la misma
-/// razón por la que `algebraic_sigmoid` con inversa ajustada terminó
-/// dándole MENOS señal a la banda rápida, no más). Se opta acá por
-/// preservar el `z` (lo que el optimizador realmente ve), no el `alpha`.
-fn temperatura() -> f32 {
+/// Explicit trade-off, not hidden: for "only T changes" to be literally true
+/// in the code (same `log_clock` values at startup, zero change to
+/// initialization), the INITIAL `alpha` shifts a bit (less extreme -- with
+/// T=1.3, alpha=0.018 at init becomes ≈0.044). There's no way to have
+/// EXACTLY the same initial alpha AND more derivative there at the same time
+/// with a single reparametrization family (it's the same reason
+/// `algebraic_sigmoid` with an adjusted inverse ended up giving LESS signal
+/// to the fast band, not more). The choice here is to preserve `z` (what the
+/// optimizer actually sees), not `alpha`.
+fn temperature() -> f32 {
     std::env::var("EVA_ALPHA_TEMP").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0)
 }
 
@@ -41,15 +41,15 @@ fn alpha_squash(z: &Tensor) -> Tensor {
     if antisat() {
         ops::algebraic_sigmoid(z)
     } else {
-        let t = temperatura();
+        let t = temperature();
         if t != 1.0 { ops::sigmoid(&ops::scale(z, 1.0 / t)) } else { ops::sigmoid(z) }
     }
 }
 
-/// Inversa de `alpha_squash`, sólo para inicializar `log_clock` apuntando
-/// al mismo `alpha` objetivo sin importar qué squashing esté activo -- si
-/// no, cambiar el squashing también cambiaría el rango inicial y ya no
-/// sería una sola variable entre las dos condiciones.
+/// Inverse of `alpha_squash`, only to initialize `log_clock` pointing at the
+/// same target `alpha` regardless of which squashing is active -- otherwise
+/// changing the squashing would also change the initial range and it
+/// wouldn't be a single variable between the two conditions anymore.
 fn alpha_squash_inv(a: f32) -> f32 {
     if antisat() {
         // s(z)=0.5(1+z/sqrt(1+z^2))  =>  z = (2a-1) / (2*sqrt(a(1-a)))
@@ -76,12 +76,13 @@ impl ClockMem {
             wv: Linear::new(d, d, rng),
             wg: Linear::new(d, d, rng),
             log_clock: {
-                // TECHO DEL RELOJ. Con 0.9999 un canal olvida tan despacio que
-                // acumula ~10.000 términos: dentro de una ventana de 64 tokens
-                // es inofensivo, pero con estado persistente a lo largo del
-                // corpus SATURA -- medido, la magnitud del estado llegó a 881.
-                // Con 0.999 la memoria efectiva es de ~1000 tokens, quince
-                // veces la ventana, que es justo lo que se quiere sin explotar.
+                // CLOCK CEILING. With 0.9999 a channel forgets so slowly
+                // that it accumulates ~10,000 terms: harmless within a
+                // 64-token window, but with persistent state across the
+                // whole corpus it SATURATES -- measured, the state's
+                // magnitude reached 881. With 0.999 the effective memory is
+                // ~1000 tokens, fifteen times the window, which is exactly
+                // what we want without blowing up.
                 let a_max = std::env::var("EVA_ALPHA_MAX")
                     .ok()
                     .and_then(|v| v.parse::<f32>().ok())
@@ -102,8 +103,8 @@ impl ClockMem {
 }
 
 impl ClockMem {
-    /// Igual que `forward`, arrancando del estado que dejó la ventana anterior
-    /// y devolviendo el que queda para la siguiente.
+    /// Same as `forward`, starting from the state the previous window left
+    /// behind and returning the one left for the next.
     pub fn forward_from(&self, x: &Tensor, s0: &[f32]) -> (Tensor, Vec<f32>) {
         let q = self.wq.forward(x);
         let k = self.wk.forward(x);

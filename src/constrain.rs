@@ -1,43 +1,44 @@
-//! Qué puede venir después. Piezas intercambiables.
+//! What can come next. Interchangeable pieces.
 //!
-//! DOS COSAS DISTINTAS, y sólo la primera existía antes acá:
+//! TWO DIFFERENT THINGS, and only the first one existed here before:
 //!
-//! 1. **Que no elija mal.** Una máscara sobre los logits ya lo lograba.
-//! 2. **Que no gaste.** Eso la máscara NO lo lograba, porque se aplicaba
-//!    *después* de calcular los 256 logits: el modelo hacía todo el trabajo y
-//!    después se tiraba lo ilegal.
+//! 1. **Not choosing wrong.** A mask over the logits already achieved that.
+//! 2. **Not wasting compute.** The mask did NOT achieve that, because it was
+//!    applied *after* computing all 256 logits: the model did the full work
+//!    and then the illegal part got thrown away.
 //!
-//! La diferencia está en CUÁNDO se pregunta. Si la restricción se consulta
-//! **antes** del paso, puede decir "acá sólo puede venir esto" y entonces:
+//! The difference is in WHEN it gets asked. If the constraint is consulted
+//! **before** the step, it can say "only this can come next" and then:
 //!
-//! - Con **una sola** continuación posible no hay nada que decidir: se emite y
-//!   no se calcula la proyección de salida.
-//! - Con **k** continuaciones se calculan k columnas de la cabeza en vez de
-//!   todo el vocabulario.
+//! - With **a single** possible continuation there's nothing to decide: it
+//!   gets emitted and the output projection isn't computed at all.
+//! - With **k** continuations, k columns of the head get computed instead
+//!   of the whole vocabulary.
 //!
-//! CUÁNTO VALE ESO depende del vocabulario, y conviene decirlo: en este modelo
-//! byte-level la cabeza es `dim × 256`, apenas ~2,5% del trabajo por token, así
-//! que el ahorro se ve poco. Con un vocabulario real de 32 mil, la cabeza pasa
-//! a ser `dim × 32000` y **domina** el costo por token. Ahí saltearla no es un
-//! detalle.
+//! HOW MUCH THAT'S WORTH depends on the vocabulary, and it's worth saying:
+//! in this byte-level model the head is `dim x 256`, barely ~2.5% of the
+//! work per token, so the savings barely show. With a real 32k vocabulary,
+//! the head becomes `dim x 32000` and **dominates** the per-token cost.
+//! There, skipping it isn't a minor detail.
 //!
-//! LA ADVERTENCIA QUE VIENE MEDIDA de la otra punta del proyecto: una
-//! restricción **floja** salió peor que ninguna -- con gramática suelta
-//! aparecieron 8 citas basura donde sin gramática había cero. Media
-//! restricción no es media protección: es la protección apagada más la ilusión
-//! de tenerla. Si una restricción no puede decir con certeza qué es legal, que
-//! devuelva `Any` y no una lista a medias.
+//! THE WARNING THAT CAME MEASURED from the other end of the project: a
+//! **loose** constraint came out worse than none at all -- with loose
+//! grammar, 8 garbage citations showed up where there were zero without
+//! grammar. Half a constraint isn't half the protection: it's the
+//! protection turned off plus the illusion of having it. If a constraint
+//! can't say with certainty what's legal, it should return `Any`, not a
+//! half-built list.
 
-/// Lo que la estructura permite en esta posición.
+/// What the structure allows at this position.
 pub enum Allowed {
-    /// Cualquier token: el modelo decide libre.
+    /// Any token: the model decides freely.
     Any,
-    /// Sólo estos, en orden. **Con uno solo el modelo no se consulta.**
+    /// Only these, in order. **With just one, the model isn't consulted.**
     Only(Vec<usize>),
 }
 
 impl Allowed {
-    /// Si hay una sola opción, no hay decisión que tomar.
+    /// If there's a single option, there's no decision to make.
     pub fn forced(&self) -> Option<usize> {
         match self {
             Allowed::Only(v) if v.len() == 1 => Some(v[0]),
@@ -47,14 +48,15 @@ impl Allowed {
 }
 
 pub trait Constraint {
-    /// Se consulta ANTES de correr el modelo. `so_far` es todo lo emitido.
+    /// Consulted BEFORE running the model. `so_far` is everything emitted
+    /// so far.
     fn allowed(&mut self, so_far: &[usize]) -> Allowed;
 
-    /// Para que la corrida diga bajo qué restricción se generó.
+    /// So the run can say under which constraint it generated.
     fn name(&self) -> String;
 }
 
-/// Sin restricción: el modelo decide todo. Es la línea base.
+/// No constraint: the model decides everything. This is the baseline.
 pub struct Free;
 
 impl Constraint for Free {
@@ -62,46 +64,48 @@ impl Constraint for Free {
         Allowed::Any
     }
     fn name(&self) -> String {
-        "libre".into()
+        "free".into()
     }
 }
 
-/// Un molde con huecos: texto fijo y tramos donde el modelo decide.
+/// A template with holes: fixed text and spans where the model decides.
 ///
-/// Es la forma que tiene la salida útil de un sistema real -- marco emite
-/// `{"decir": "...", "citando": [2]}` y de esos ~30 caracteres el modelo sólo
-/// elige los del hueco. Todo lo demás es sintaxis que se sabe de antemano y
-/// que hoy se le hace producir token por token, pagando el modelo entero por
-/// cada llave y cada coma.
+/// This is the shape real, useful output takes in an actual system --
+/// marco emits `{"say": "...", "citing": [2]}` and out of those ~30
+/// characters the model only chooses the ones in the hole. Everything else
+/// is syntax known in advance that today gets produced token by token,
+/// paying the full model for every brace and every comma.
 pub struct Skeleton {
-    /// Tramos alternados: fijo, hueco, fijo, hueco... El hueco lleva su largo
-    /// máximo y el byte que lo cierra.
+    /// Alternating spans: fixed, hole, fixed, hole... A hole carries its
+    /// max length and the byte that closes it.
     fixed: Vec<Vec<usize>>,
     slots: Vec<(usize, usize)>,
-    /// Posición dentro del molde.
+    /// Position within the template.
     at: usize,
-    /// Cuántos bytes lleva emitidos el hueco actual.
+    /// How many bytes the current hole has emitted so far.
     in_slot: usize,
 }
 
 impl Skeleton {
-    /// `partes` alterna texto fijo y huecos: el primer y último tramo son
-    /// fijos. Un hueco es `(largo máximo, byte que lo cierra)`.
+    /// `parts` alternates fixed text and holes: the first and last spans
+    /// are fixed. A hole is `(max length, byte that closes it)`.
     ///
-    /// OJO CON EL BYTE QUE CIERRA: lo emite el hueco, no el tramo siguiente.
-    /// Para `{"di":"hola"}` el molde es `["{\"di\":\"", "}"]` con el hueco
-    /// cerrando en `"`. Poner la comilla también al principio de la cola la
-    /// pediría dos veces -- me pasó escribiendo el test.
-    pub fn new(partes: &[&str], slots: &[(usize, u8)]) -> Self {
+    /// WATCH OUT FOR THE CLOSING BYTE: the hole emits it, not the next
+    /// span. For `{"say":"hi"}` the template is `["{\"say\":\"", "}"]`
+    /// with the hole closing on `"`. Also putting the quote at the start
+    /// of the tail would ask for it twice -- happened to me writing the
+    /// test.
+    pub fn new(parts: &[&str], slots: &[(usize, u8)]) -> Self {
         Skeleton {
-            fixed: partes.iter().map(|p| p.bytes().map(|b| b as usize).collect()).collect(),
+            fixed: parts.iter().map(|p| p.bytes().map(|b| b as usize).collect()).collect(),
             slots: slots.iter().map(|&(n, b)| (n, b as usize)).collect(),
             at: 0,
             in_slot: 0,
         }
     }
 
-    /// Cuántos bytes del molde son fijos: el techo de lo que se puede saltear.
+    /// How many bytes of the template are fixed: the ceiling of what can be
+    /// skipped.
     pub fn fixed_bytes(&self) -> usize {
         self.fixed.iter().map(|f| f.len()).sum()
     }
@@ -109,35 +113,37 @@ impl Skeleton {
 
 impl Constraint for Skeleton {
     fn allowed(&mut self, so_far: &[usize]) -> Allowed {
-        // Reconstruye dónde está mirando lo ya emitido. Sin estado propio que
-        // se pueda desincronizar del texto: el molde se relee cada vez.
+        // Reconstructs where it's looking based on what's already emitted.
+        // No internal state that could drift out of sync with the text:
+        // the template gets re-read every time.
         let mut i = 0usize;
         let mut fi = 0usize;
         let mut si = 0usize;
         loop {
-            // Tramo fijo.
+            // Fixed span.
             if fi < self.fixed.len() {
                 let f = &self.fixed[fi];
-                let ya = so_far.len() - i;
-                if ya < f.len() {
-                    return Allowed::Only(vec![f[ya]]);
+                let done = so_far.len() - i;
+                if done < f.len() {
+                    return Allowed::Only(vec![f[done]]);
                 }
                 i += f.len();
                 fi += 1;
             }
-            // Hueco.
+            // Hole.
             if si < self.slots.len() {
-                let (max, cierra) = self.slots[si];
+                let (max, closes) = self.slots[si];
                 let mut n = 0;
-                while i + n < so_far.len() && so_far[i + n] != cierra && n < max {
+                while i + n < so_far.len() && so_far[i + n] != closes && n < max {
                     n += 1;
                 }
                 if i + n >= so_far.len() {
-                    // Adentro del hueco: decide el modelo, salvo que se pase
-                    // del largo, donde lo único legal es cerrar.
-                    return if n >= max { Allowed::Only(vec![cierra]) } else { Allowed::Any };
+                    // Inside the hole: the model decides, unless it went
+                    // past the max length, where the only legal thing is
+                    // to close it.
+                    return if n >= max { Allowed::Only(vec![closes]) } else { Allowed::Any };
                 }
-                i += n + 1; // el byte que cierra ya está
+                i += n + 1; // the closing byte is already there
                 si += 1;
             } else if fi >= self.fixed.len() {
                 return Allowed::Any;
@@ -146,7 +152,7 @@ impl Constraint for Skeleton {
     }
 
     fn name(&self) -> String {
-        format!("molde ({} tramos fijos, {} huecos)", self.fixed.len(), self.slots.len())
+        format!("template ({} fixed spans, {} holes)", self.fixed.len(), self.slots.len())
     }
 }
 
@@ -158,9 +164,9 @@ mod tests {
         s.bytes().map(|b| b as usize).collect()
     }
 
-    fn como_texto(a: &Allowed) -> String {
+    fn as_text(a: &Allowed) -> String {
         match a {
-            Allowed::Any => "libre".into(),
+            Allowed::Any => "free".into(),
             Allowed::Only(v) => v.iter().map(|&b| b as u8 as char).collect(),
         }
     }
@@ -168,11 +174,11 @@ mod tests {
     #[test]
     fn the_fixed_part_leaves_nothing_to_decide() {
         let mut k = Skeleton::new(&[r#"{"di":""#, "}"], &[(20, b'"')]);
-        // Byte por byte del prefijo: siempre una sola opción.
-        for (i, esperado) in r#"{"di":""#.bytes().enumerate() {
-            let hasta = bytes(&r#"{"di":""#[..i]);
-            let a = k.allowed(&hasta);
-            assert_eq!(Some(esperado as usize), a.forced(), "en la posición {i}");
+        // Byte by byte of the prefix: always a single option.
+        for (i, expected) in r#"{"di":""#.bytes().enumerate() {
+            let so_far = bytes(&r#"{"di":""#[..i]);
+            let a = k.allowed(&so_far);
+            assert_eq!(Some(expected as usize), a.forced(), "at position {i}");
         }
     }
 
@@ -180,17 +186,17 @@ mod tests {
     fn inside_the_slot_the_model_decides() {
         let mut k = Skeleton::new(&[r#"{"di":""#, "}"], &[(20, b'"')]);
         let a = k.allowed(&bytes(r#"{"di":"ho"#));
-        assert!(a.forced().is_none(), "adentro del hueco tiene que decidir el modelo");
+        assert!(a.forced().is_none(), "inside the hole the model has to decide");
     }
 
     #[test]
     fn a_slot_that_ran_out_can_only_close() {
-        // El techo de largo es parte de la restricción: sin él, el hueco es un
-        // grado de libertad que se llena con basura -- medido en el otro
-        // proyecto, la lista de citas sin techo citaba todo.
+        // The length cap is part of the constraint: without it, the hole
+        // is a degree of freedom that fills with garbage -- measured in
+        // the other project, an uncapped citation list cited everything.
         let mut k = Skeleton::new(&[r#"{"di":""#, "}"], &[(3, b'"')]);
         let a = k.allowed(&bytes(r#"{"di":"abc"#));
-        assert_eq!(Some(b'"' as usize), a.forced(), "pasado el techo sólo puede cerrar");
+        assert_eq!(Some(b'"' as usize), a.forced(), "past the cap it can only close");
     }
 
     #[test]

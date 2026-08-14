@@ -1,61 +1,63 @@
-//! Cuánta memoria sostiene el grafo de autograd, medido y no estimado.
+//! How much memory the autograd graph holds, measured rather than estimated.
 //!
-//! POR QUÉ EXISTE: para retropropagar hay que sostener lo que produjo la
-//! pasada hacia adelante, y ESA es la razón por la que entrenar necesita
-//! hardware caro -- no el cómputo, la memoria. Antes de intentar bajarla hay
-//! que saber cuánta es, separada de los parámetros y del estado del
-//! optimizador, que se pagan igual.
+//! WHY THIS EXISTS: backpropagation has to hold onto whatever the forward
+//! pass produced, and THAT is why training needs expensive hardware -- not
+//! the compute, the memory. Before trying to bring it down you need to know
+//! how much there is, separated from the parameters and from the optimizer
+//! state, which cost the same either way.
 //!
-//! El pico del proceso (`VmHWM`) no sirve para esto: mezcla todo y además es
-//! marca de agua del asignador, así que cuenta fragmentación. Acá se cuentan
-//! los bytes que el grafo tiene VIVOS en cada instante.
+//! The process's peak (`VmHWM`) doesn't work for this: it mixes everything
+//! together and is also a watermark of the allocator, so it counts
+//! fragmentation too. Here we count the bytes the graph has ALIVE at each
+//! instant.
 //!
-//! Y UN DETALLE DE NUESTRO CASO que cambia el tamaño del premio: `finalize`
-//! **clona las entradas** de cada operación en `saved_v`. O sea que no
-//! guardamos activaciones: guardamos **copias** de activaciones. El desglose
-//! por operación de acá abajo es lo que dice cuáles clonan de más.
+//! And ONE DETAIL OF OUR CASE that changes the size of the prize: `finalize`
+//! **clones the inputs** of every operation into `saved_v`. In other words we
+//! don't hold activations: we hold **copies** of activations. The per-op
+//! breakdown below is what tells you which ones over-clone.
 
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::Mutex;
 
-/// El mecanismo, separado de la instancia global.
+/// The mechanism, kept separate from the global instance.
 ///
-/// POR QUÉ SEPARADO: la primera versión tenía los contadores como estáticos
-/// sueltos y el test afirmaba sobre ellos. Los tests de Rust corren en
-/// paralelo y casi todos crean grafos, así que cualquier otro test movía el
-/// contador entre la lectura y la aserción. **Flaky por construcción**, y
-/// apareció una vez en la suite completa antes de que nadie lo buscara.
-/// Con el mecanismo aparte, el test usa su propia instancia y no hay carrera.
-pub struct Contador {
-    vivos: AtomicUsize,
-    pico: AtomicUsize,
-    nodos: AtomicUsize,
-    nodos_pico: AtomicUsize,
-    grads_pico: AtomicUsize,
-    /// Bytes acumulados por operación: no es lo vivo sino el total que pasó,
-    /// para saber quién guarda más a lo largo del entrenamiento.
-    por_op: Mutex<Vec<(&'static str, usize, usize)>>,
+/// WHY SEPARATE: the first version had the counters as loose statics and the
+/// test asserted directly on them. Rust tests run in parallel and almost all
+/// of them build graphs, so any other test would move the counter between
+/// the read and the assertion. **Flaky by construction**, and it showed up
+/// once in the full suite before anyone went looking for it. With the
+/// mechanism split out, the test uses its own instance and there's no race.
+pub struct Counter {
+    live: AtomicUsize,
+    peak: AtomicUsize,
+    nodes: AtomicUsize,
+    nodes_peak: AtomicUsize,
+    grads_peak: AtomicUsize,
+    /// Bytes accumulated per operation: not what's currently alive but the
+    /// total that ever passed through, to know who holds the most over the
+    /// whole training run.
+    by_op: Mutex<Vec<(&'static str, usize, usize)>>,
 }
 
-impl Contador {
+impl Counter {
     pub const fn new() -> Self {
-        Contador {
-            vivos: AtomicUsize::new(0),
-            pico: AtomicUsize::new(0),
-            nodos: AtomicUsize::new(0),
-            nodos_pico: AtomicUsize::new(0),
-            grads_pico: AtomicUsize::new(0),
-            por_op: Mutex::new(Vec::new()),
+        Counter {
+            live: AtomicUsize::new(0),
+            peak: AtomicUsize::new(0),
+            nodes: AtomicUsize::new(0),
+            nodes_peak: AtomicUsize::new(0),
+            grads_peak: AtomicUsize::new(0),
+            by_op: Mutex::new(Vec::new()),
         }
     }
 
-    pub fn entra(&self, op: &'static str, bytes: usize) {
-        let ahora = self.vivos.fetch_add(bytes, Relaxed) + bytes;
-        self.pico.fetch_max(ahora, Relaxed);
-        let n = self.nodos.fetch_add(1, Relaxed) + 1;
-        self.nodos_pico.fetch_max(n, Relaxed);
+    pub fn enter(&self, op: &'static str, bytes: usize) {
+        let now = self.live.fetch_add(bytes, Relaxed) + bytes;
+        self.peak.fetch_max(now, Relaxed);
+        let n = self.nodes.fetch_add(1, Relaxed) + 1;
+        self.nodes_peak.fetch_max(n, Relaxed);
 
-        let mut t = self.por_op.lock().unwrap();
+        let mut t = self.by_op.lock().unwrap();
         match t.iter_mut().find(|(o, _, _)| *o == op) {
             Some((_, b, c)) => {
                 *b += bytes;
@@ -65,72 +67,73 @@ impl Contador {
         }
     }
 
-    pub fn sale(&self, bytes: usize) {
-        self.vivos.fetch_sub(bytes, Relaxed);
-        self.nodos.fetch_sub(1, Relaxed);
+    pub fn leave(&self, bytes: usize) {
+        self.live.fetch_sub(bytes, Relaxed);
+        self.nodes.fetch_sub(1, Relaxed);
     }
 
-    pub fn vivos(&self) -> usize {
-        self.vivos.load(Relaxed)
+    pub fn live(&self) -> usize {
+        self.live.load(Relaxed)
     }
 
-    pub fn pico(&self) -> usize {
-        self.pico.load(Relaxed)
+    pub fn peak(&self) -> usize {
+        self.peak.load(Relaxed)
     }
 }
 
-static G: Contador = Contador::new();
+static G: Counter = Counter::new();
 
-/// Un nodo entró al grafo.
-pub fn entra(op: &'static str, bytes: usize) {
-    G.entra(op, bytes);
+/// A node entered the graph.
+pub fn enter(op: &'static str, bytes: usize) {
+    G.enter(op, bytes);
 }
 
-/// Un nodo se liberó.
-pub fn sale(bytes: usize) {
-    G.sale(bytes);
+/// A node was freed.
+pub fn leave(bytes: usize) {
+    G.leave(bytes);
 }
 
-pub fn pico_mb() -> f64 {
-    G.pico() as f64 / 1_048_576.0
+pub fn peak_mb() -> f64 {
+    G.peak() as f64 / 1_048_576.0
 }
 
-pub fn vivos_mb() -> f64 {
-    G.vivos() as f64 / 1_048_576.0
+pub fn live_mb() -> f64 {
+    G.live() as f64 / 1_048_576.0
 }
 
-pub fn nodos_pico() -> usize {
-    G.nodos_pico.load(Relaxed)
+pub fn nodes_peak() -> usize {
+    G.nodes_peak.load(Relaxed)
 }
 
-/// Cuánto ocupa el mapa de gradientes en su punto más alto.
+/// How much the gradient map takes up at its highest point.
 ///
-/// `backward` crea un `Vec` nuevo por CADA tensor que recibe gradiente --no
-/// sólo por parámetro-- y lo tira al terminar el paso.
+/// `backward` creates a new `Vec` for EVERY tensor that receives a
+/// gradient -- not just for parameters -- and throws it away at the end of
+/// the step.
 pub fn grads(bytes: usize) {
-    G.grads_pico.fetch_max(bytes, Relaxed);
+    G.grads_peak.fetch_max(bytes, Relaxed);
 }
 
-/// Informe: cuánto sostiene el grafo y quién lo sostiene.
-pub fn informe(params: usize) {
-    let mut t = G.por_op.lock().unwrap().clone();
+/// Report: how much the graph holds and who's holding it.
+pub fn report(params: usize) {
+    let mut t = G.by_op.lock().unwrap().clone();
     t.sort_by_key(|(_, b, _)| std::cmp::Reverse(*b));
     let total: usize = t.iter().map(|(_, b, _)| *b).sum();
 
-    let pesos = params * 4;
+    let weights = params * 4;
     let adam = params * 8;
-    println!("\n── qué sostiene la memoria de entrenamiento ──");
-    println!("  parámetros            {:8.1} MB   (inevitable)", pesos as f64 / 1_048_576.0);
-    println!("  estado de AdamW       {:8.1} MB   (inevitable hoy)", adam as f64 / 1_048_576.0);
-    println!("  GRAFO, pico propio    {:8.1} MB", pico_mb());
-    println!("  nodos vivos, pico     {:8}", nodos_pico());
-    println!("  grafo vivo ahora      {:8.1} MB   (0 si se liberó todo)", vivos_mb());
-    println!("  MAPA DE GRADIENTES    {:8.1} MB   <- un Vec nuevo por tensor, cada paso",
-        G.grads_pico.load(Relaxed) as f64 / 1_048_576.0);
+    println!("\n-- what holds the training memory --");
+    println!("  parameters            {:8.1} MB   (unavoidable)", weights as f64 / 1_048_576.0);
+    println!("  AdamW state           {:8.1} MB   (unavoidable today)", adam as f64 / 1_048_576.0);
+    println!("  GRAPH, own peak       {:8.1} MB", peak_mb());
+    println!("  live nodes, peak      {:8}", nodes_peak());
+    println!("  graph alive now       {:8.1} MB   (0 if everything was freed)", live_mb());
+    println!("  GRADIENT MAP          {:8.1} MB   <- a new Vec per tensor, every step",
+        G.grads_peak.load(Relaxed) as f64 / 1_048_576.0);
 
-    println!("\n── quién guarda, acumulado sobre todo el entrenamiento ──");
+    println!("\n-- who holds, accumulated over the whole training run --");
     for (op, b, c) in t.iter().take(8) {
-        println!("  {op:<16} {:9.1} MB en {c:>7} nodos   {:4.0}%",
+        println!("  {op:<16} {:9.1} MB in {c:>7} nodes   {:4.0}%",
             *b as f64 / 1_048_576.0, 100.0 * *b as f64 / total.max(1) as f64);
     }
 }
@@ -139,47 +142,49 @@ pub fn informe(params: usize) {
 mod tests {
     use super::*;
 
-    /// Sobre una instancia PROPIA, no sobre la global: la versión anterior
-    /// afirmaba sobre el contador compartido mientras el resto de la suite
-    /// creaba grafos en paralelo. Era flaky por construcción y se vio una vez.
+    /// On its OWN instance, not the global one: the previous version
+    /// asserted on the shared counter while the rest of the suite was
+    /// building graphs in parallel. It was flaky by construction and showed
+    /// up once.
     #[test]
     fn what_goes_in_comes_out() {
-        let c = Contador::new();
-        c.entra("prueba", 1000);
-        assert_eq!(1000, c.vivos());
-        c.sale(1000);
-        assert_eq!(0, c.vivos(), "el contador quedó descompensado");
+        let c = Counter::new();
+        c.enter("test", 1000);
+        assert_eq!(1000, c.live());
+        c.leave(1000);
+        assert_eq!(0, c.live(), "the counter ended up unbalanced");
     }
 
     #[test]
     fn the_peak_does_not_go_down() {
-        let c = Contador::new();
-        c.entra("prueba", 5_000_000);
-        c.sale(5_000_000);
-        assert_eq!(5_000_000, c.pico(), "el pico bajó al liberar");
-        assert_eq!(0, c.vivos());
+        let c = Counter::new();
+        c.enter("test", 5_000_000);
+        c.leave(5_000_000);
+        assert_eq!(5_000_000, c.peak(), "the peak went down when freeing");
+        assert_eq!(0, c.live());
     }
 
-    /// Y la propiedad que el test viejo NO probaba: que aguante concurrencia.
-    /// El contador de producción lo tocan varios hilos si algún día se crean
-    /// nodos en paralelo, y una suma perdida arruinaría toda la medición.
+    /// And the property the old test did NOT check: that it survives
+    /// concurrency. The production counter is touched by several threads if
+    /// nodes ever get created in parallel, and a lost addition would ruin
+    /// the whole measurement.
     #[test]
     fn it_survives_many_threads() {
-        let c = std::sync::Arc::new(Contador::new());
-        let mut hilos = Vec::new();
+        let c = std::sync::Arc::new(Counter::new());
+        let mut threads = Vec::new();
         for _ in 0..8 {
             let c = c.clone();
-            hilos.push(std::thread::spawn(move || {
+            threads.push(std::thread::spawn(move || {
                 for _ in 0..2000 {
-                    c.entra("concurrente", 64);
-                    c.sale(64);
+                    c.enter("concurrent", 64);
+                    c.leave(64);
                 }
             }));
         }
-        for h in hilos {
+        for h in threads {
             h.join().unwrap();
         }
-        assert_eq!(0, c.vivos(), "se perdieron sumas o restas entre hilos");
-        assert!(c.pico() >= 64);
+        assert_eq!(0, c.live(), "additions or subtractions were lost between threads");
+        assert!(c.peak() >= 64);
     }
 }

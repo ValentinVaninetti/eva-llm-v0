@@ -1,54 +1,55 @@
-//! Inferencia de a un token, llevando estado.
+//! Token-by-token inference, carrying state.
 //!
-//! POR QUÉ EXISTE, con el desperdicio medido: `generate` rehacía la pasada
-//! completa sobre toda la ventana **para cada token**, y de las 64 filas que
-//! calculaba usaba UNA y tiraba 63. Con `seq=64` eso es hasta 64x de trabajo
-//! al pedo por token. Encima construía el grafo de autograd entero --con sus
-//! clones de entradas por operación-- para descartarlo enseguida.
+//! WHY THIS EXISTS, with the waste measured: `generate` used to redo the
+//! full pass over the whole window **for every token**, and out of the 64
+//! rows it computed it used ONE and threw away 63. With `seq=64` that's up
+//! to 64x of wasted work per token. On top of that it built the whole
+//! autograd graph --with its per-operation input clones-- just to discard
+//! it right away.
 //!
-//! LO QUE LO HACE POSIBLE es la propiedad que distingue a esta arquitectura:
-//! el estado de `ClockMem` es de **tamaño fijo**, D números, no importa cuán
-//! largo sea el contexto. Un transformer no puede hacer esto: necesita un
-//! caché de claves y valores que **crece con cada token**. Acá se implementan
-//! los dos, justamente para que esa diferencia se pueda medir en vez de
-//! afirmarse.
+//! WHAT MAKES THIS POSSIBLE is the property that sets this architecture
+//! apart: `ClockMem`'s state is **fixed size**, D numbers, no matter how
+//! long the context is. A transformer can't do this: it needs a
+//! key/value cache that **grows with every token**. Both are implemented
+//! here, precisely so that difference can be measured instead of just
+//! claimed.
 //!
-//! EL PELIGRO, y es el motivo de que el test se escribiera antes que el
-//! código: esto es una **segunda implementación de la misma matemática**. Los
-//! dos caminos se desincronizan en silencio -- el de entrenamiento queda bien
-//! y el rápido calcula otra cosa, sin que nada falle. Por eso
-//! `tests::stream_matches_batch` exige que paso a paso dé lo mismo que la
-//! pasada completa. Si algún día ese test se pone en amarillo, el que miente
-//! es este archivo.
+//! THE DANGER, and the reason the test got written before the code: this is
+//! a **second implementation of the same math**. The two paths can drift
+//! out of sync silently -- the training one stays correct and the fast one
+//! computes something else, without anything failing. That's why
+//! `tests::stream_matches_batch` requires that, step by step, it gives the
+//! same result as the full pass. If that test ever goes red, this file is
+//! the one that's lying.
 
 use crate::model::block::Mixer;
 use crate::model::EvaModel;
 use crate::nn::{Linear, RMSNorm};
 
-/// Estado de un bloque entre un token y el siguiente.
+/// State of a block between one token and the next.
 struct BlockState {
-    /// Las `k-1` entradas anteriores de la conv, en orden, aplanadas.
+    /// The conv's previous `k-1` inputs, in order, flattened.
     ///
-    /// Arranca en ceros y eso **es** el relleno del principio: la conv suma
-    /// `w * x[src]` sólo cuando `src >= 0`, y multiplicar por cero da lo
-    /// mismo que no sumar. No hace falta un caso especial.
+    /// Starts at zeros and that **is** the padding at the start: the conv
+    /// only adds `w * x[src]` when `src >= 0`, and multiplying by zero
+    /// gives the same result as not adding it. No special case needed.
     conv: Vec<f32>,
     mixer: MixerState,
 }
 
 enum MixerState {
-    /// D números. No crece nunca, por más largo que sea el contexto.
+    /// D numbers. Never grows, no matter how long the context gets.
     Clock(Vec<f32>),
-    /// Crece con cada token: esta es la diferencia, hecha código.
+    /// Grows with every token: this is the difference, made into code.
     Attn { keys: Vec<f32>, vals: Vec<f32> },
 }
 
 pub struct Streamer<'a> {
     model: &'a EvaModel,
     blocks: Vec<BlockState>,
-    /// Posición absoluta. Sólo la usa la tabla de posiciones de la atención.
+    /// Absolute position. Only used by attention's position table.
     t: usize,
-    /// `sigmoid(log_clock)` por bloque, calculado una vez.
+    /// `sigmoid(log_clock)` per block, computed once.
     alphas: Vec<Vec<f32>>,
 }
 
@@ -77,25 +78,25 @@ impl<'a> Streamer<'a> {
         Streamer { model, blocks, t: 0, alphas }
     }
 
-    /// Consume un token y devuelve los logits del siguiente.
+    /// Consumes a token and returns the next one's logits.
     pub fn next(&mut self, id: usize) -> Vec<f32> {
         let x = self.advance(id);
         let x = rms_norm(&x, &self.model.norm_out);
         matvec(&x, &self.model.head_w.data, self.model.cfg.dim, self.model.cfg.vocab)
     }
 
-    /// Consume un token SIN calcular la proyección de salida.
+    /// Consumes a token WITHOUT computing the output projection.
     ///
-    /// Para cuando la estructura ya decidió qué viene: no hay nada que
-    /// preguntarle al modelo, pero el estado igual tiene que avanzar o se
-    /// desincroniza del texto. Esto es lo que hace que restringir AHORRE en
-    /// vez de sólo evitar el error.
+    /// For when the structure already decided what comes next: there's
+    /// nothing to ask the model, but the state still has to advance or it
+    /// drifts out of sync with the text. This is what makes restricting
+    /// SAVE work instead of just avoiding the error.
     pub fn consume(&mut self, id: usize) {
         self.advance(id);
     }
 
-    /// Logits de sólo algunas columnas, cuando la estructura dejó pocas
-    /// opciones. Devuelve `(token, logit)` en el mismo orden que `cols`.
+    /// Logits for only some columns, when the structure left few options.
+    /// Returns `(token, logit)` in the same order as `cols`.
     pub fn next_among(&mut self, id: usize, cols: &[usize]) -> Vec<f32> {
         let x = self.advance(id);
         let x = rms_norm(&x, &self.model.norm_out);
@@ -107,16 +108,16 @@ impl<'a> Streamer<'a> {
             .collect()
     }
 
-    /// Todo el modelo menos la cabeza: deja el estado listo y devuelve la
-    /// representación de la posición.
+    /// The whole model minus the head: leaves the state ready and returns
+    /// the position's representation.
     fn advance(&mut self, id: usize) -> Vec<f32> {
         let cfg = &self.model.cfg;
         let d = cfg.dim;
 
         let mut x = self.model.embed.table.data[id * d..(id + 1) * d].to_vec();
         if let Some(pos) = &self.model.pos {
-            // La tabla es de largo fijo; más allá se repite la última, que es
-            // lo que hacía el recorte de ventana.
+            // The table has fixed length; past it the last row repeats,
+            // which is what the window trimming used to do.
             let p = self.t.min(cfg.seq_len - 1);
             for (xi, pi) in x.iter_mut().zip(&pos.data[p * d..(p + 1) * d]) {
                 *xi += pi;
@@ -165,16 +166,16 @@ impl<'a> Streamer<'a> {
         let mut out = vec![0.0; d];
         for c in 0..d {
             let mut acc = b.conv.b.data[c];
-            // `u` recorre el kernel; los primeros k-1 pesos van contra la
-            // historia y el último contra el token actual, igual que el `src`
-            // de la versión por lotes.
+            // `u` walks the kernel; the first k-1 weights go against
+            // history and the last one against the current token, same as
+            // the `src` in the batched version.
             for u in 0..k - 1 {
                 acc += b.conv.w.data[c * k + u] * hist[u * d + c];
             }
             acc += b.conv.w.data[c * k + (k - 1)] * x[c];
             out[c] = acc;
         }
-        // Corre la ventana: se va el más viejo, entra el actual.
+        // Slides the window: the oldest leaves, the current one enters.
         let hist = &mut self.blocks[i].conv;
         if k > 1 {
             hist.copy_within(d.., 0);
@@ -204,13 +205,14 @@ impl<'a> Streamer<'a> {
                 let q = linear(x, &m.wq, d);
                 keys.extend_from_slice(&linear(x, &m.wk, d));
                 vals.extend_from_slice(&linear(x, &m.wv, d));
-                // El caché se recorta a la ventana con la que se entrenó, que
-                // es lo que hacía el recorte de la versión vieja. Sin tope, la
-                // atención mira más lejos de lo que vio nunca en
-                // entrenamiento, Y la memoria crece sin límite. ClockMem no
-                // necesita este recorte: su olvido está en el mecanismo.
-                let tope = self.model.cfg.seq_len;
-                if keys.len() / d > tope {
+                // The cache gets trimmed to the window it was trained
+                // with, which is what the old version's window trimming
+                // did. Without a cap, attention looks further than it ever
+                // saw during training, AND memory grows without bound.
+                // ClockMem doesn't need this trim: its forgetting is built
+                // into the mechanism.
+                let cap = self.model.cfg.seq_len;
+                if keys.len() / d > cap {
                     keys.drain(..d);
                     vals.drain(..d);
                 }
@@ -240,7 +242,7 @@ impl<'a> Streamer<'a> {
                 }
                 linear(&ctx, &m.wo, d)
             }
-            _ => unreachable!("el estado no corresponde al mezclador"),
+            _ => unreachable!("the state does not match the mixer"),
         }
     }
 }
@@ -268,8 +270,9 @@ fn linear(x: &[f32], l: &Linear, out_d: usize) -> Vec<f32> {
     y
 }
 
-/// Una fila por una matriz. Usa el mismo `math::matmul` que el entrenamiento
-/// --con su AVX2 y su reparto-- en vez de escribir un tercer producto.
+/// One row times a matrix. Uses the same `math::matmul` that training does
+/// --with its AVX2 and its work splitting-- instead of writing a third
+/// product implementation.
 fn matvec(x: &[f32], w: &[f32], k: usize, n: usize) -> Vec<f32> {
     let mut out = vec![0.0; n];
     crate::math::matmul(x, w, 1, k, n, &mut out);
@@ -281,7 +284,7 @@ mod tests {
     use super::*;
     use crate::model::{Arch, EvaConfig, EvaModel};
 
-    fn modelo(arch: Arch) -> EvaModel {
+    fn make_model(arch: Arch) -> EvaModel {
         EvaModel::new(EvaConfig {
             vocab: 32,
             dim: 24,
@@ -294,38 +297,40 @@ mod tests {
         })
     }
 
-    /// EL TEST QUE JUSTIFICA EL ARCHIVO.
+    /// THE TEST THAT JUSTIFIES THIS FILE.
     ///
-    /// `stream.rs` es una segunda implementación de la misma matemática, y dos
-    /// implementaciones se desincronizan en silencio: la de entrenamiento
-    /// queda bien, la rápida calcula otra cosa, y nada falla. Acá se exige que
-    /// la última fila de la pasada completa sea la misma que la que devuelve
-    /// el paso a paso, para cada posición.
+    /// `stream.rs` is a second implementation of the same math, and two
+    /// implementations can drift out of sync silently: the training one
+    /// stays correct, the fast one computes something else, and nothing
+    /// fails. This requires that the last row of the full pass matches
+    /// what the step-by-step version returns, for every position.
     ///
-    /// No se pide igualdad exacta de bits: la pasada por lotes suma en otro
-    /// orden que la fila sola, y en punto flotante eso difiere en el último
-    /// dígito. Se pide 1e-4 relativo, que es varios órdenes por debajo de
-    /// cualquier diferencia que signifique un error de lógica.
-    fn stream_iguala_a_lote(arch: Arch) {
-        let m = modelo(arch);
+    /// Exact bit equality isn't required: the batched pass sums in a
+    /// different order than the single row does, and in floating point
+    /// that differs in the last digit. A relative 1e-4 is required, which
+    /// is several orders of magnitude below any difference that would mean
+    /// a logic error.
+    fn stream_matches_batch(arch: Arch) {
+        let m = make_model(arch);
         let ids: Vec<usize> = vec![7, 3, 19, 0, 11, 4, 28, 15];
 
         let mut st = Streamer::new(&m);
         for (i, &id) in ids.iter().enumerate() {
-            let paso = st.next(id);
+            let step = st.next(id);
 
-            // La pasada completa sobre el prefijo: su última fila predice lo
-            // mismo que el paso a paso después de consumir ese token.
-            let lote = m.forward(&ids[..=i]);
-            let v = lote.shape[1];
-            let ultima = &lote.data[(lote.shape[0] - 1) * v..];
+            // Full pass over the prefix: its last row predicts the same
+            // thing as the step-by-step version after consuming that
+            // token.
+            let batch = m.forward(&ids[..=i]);
+            let v = batch.shape[1];
+            let last = &batch.data[(batch.shape[0] - 1) * v..];
 
-            assert_eq!(ultima.len(), paso.len());
-            for (j, (a, b)) in ultima.iter().zip(&paso).enumerate() {
+            assert_eq!(last.len(), step.len());
+            for (j, (a, b)) in last.iter().zip(&step).enumerate() {
                 let err = (a - b).abs() / (a.abs() + b.abs()).max(1.0);
                 assert!(
                     err < 1e-4,
-                    "posición {i}, logit {j}: lote={a} stream={b} (err {err:.2e})"
+                    "position {i}, logit {j}: batch={a} stream={b} (err {err:.2e})"
                 );
             }
         }
@@ -333,22 +338,22 @@ mod tests {
 
     #[test]
     fn stream_matches_batch_clock() {
-        stream_iguala_a_lote(Arch::Clock);
+        stream_matches_batch(Arch::Clock);
     }
 
     #[test]
     fn stream_matches_batch_attn() {
-        stream_iguala_a_lote(Arch::Attn);
+        stream_matches_batch(Arch::Attn);
     }
 
-    /// La propiedad que hace que todo esto valga la pena: el estado de
-    /// ClockMem NO crece con el contexto. Si algún día crece, se perdió la
-    /// única ventaja estructural que tenemos sobre un transformer.
+    /// The property that makes all of this worth it: ClockMem's state does
+    /// NOT grow with context. If it ever does, we lost the one structural
+    /// advantage we have over a transformer.
     #[test]
     fn clock_state_does_not_grow_with_context() {
-        let m = modelo(Arch::Clock);
+        let m = make_model(Arch::Clock);
         let mut st = Streamer::new(&m);
-        let tamano = |s: &Streamer| -> usize {
+        let size = |s: &Streamer| -> usize {
             s.blocks
                 .iter()
                 .map(|b| {
@@ -360,19 +365,19 @@ mod tests {
                 })
                 .sum()
         };
-        let inicial = tamano(&st);
+        let initial = size(&st);
         for i in 0..200 {
             st.next(i % 32);
         }
-        assert_eq!(inicial, tamano(&st), "el estado creció con el contexto");
+        assert_eq!(initial, size(&st), "the state grew with context");
     }
 
-    /// Y el contraste, que es el punto de haber implementado las dos: el de la
-    /// atención SÍ crece, linealmente. Esto no es un defecto de la
-    /// implementación, es la arquitectura.
+    /// And the contrast, which is the point of having implemented both:
+    /// attention's DOES grow, linearly. This isn't an implementation
+    /// defect, it's the architecture.
     #[test]
     fn attention_cache_grows_and_that_is_the_difference() {
-        let m = modelo(Arch::Attn);
+        let m = make_model(Arch::Attn);
         let mut st = Streamer::new(&m);
         let cache = |s: &Streamer| -> usize {
             s.blocks
@@ -387,11 +392,11 @@ mod tests {
         for i in 0..50 {
             st.next(i % 32);
         }
-        // Crece hasta la ventana de entrenamiento y ahí se detiene. Aun con
-        // tope, es 12 veces el estado de ClockMem para el mismo modelo -- y
-        // sin tope crecería para siempre.
+        // Grows up to the training window and stops there. Even capped,
+        // it's 12 times ClockMem's state for the same model -- and
+        // uncapped it would grow forever.
         assert_eq!(3 * 12 * 24 * 2, cache(&st));
-        let clock = modelo(Arch::Clock);
+        let clock = make_model(Arch::Clock);
         let mut sc = Streamer::new(&clock);
         for i in 0..50 {
             sc.next(i % 32);
@@ -404,6 +409,6 @@ mod tests {
                 MixerState::Attn { keys, vals } => keys.len() + vals.len(),
             })
             .sum();
-        assert!(cache(&st) > 10 * clock_state, "la diferencia de memoria se perdió");
+        assert!(cache(&st) > 10 * clock_state, "the memory difference got lost");
     }
 }

@@ -1,24 +1,26 @@
-//! Atención causal de una cabeza. **Existe para tener contra qué medir.**
+//! Single-head causal attention. **Exists to have something to measure
+//! against.**
 //!
-//! No es la dirección del proyecto: es el patrón de referencia. Hasta que esto
-//! estuvo, la única evidencia de que EvaClock funcionaba era que memorizaba un
-//! corpus de 55 KB, cosa que hace cualquier cosa con suficientes parámetros.
+//! It isn't the direction of the project: it's the reference baseline. Until
+//! this existed, the only evidence that EvaClock worked was that it
+//! memorized a 55 KB corpus, which anything with enough parameters can do.
 //!
-//! LA COMPARACIÓN ES JUSTA POR CONSTRUCCIÓN, que es todo el punto: ClockMem
-//! tiene `wq, wk, wv, wg` y esto tiene `wq, wk, wv, wo` -- cuatro matrices DxD
-//! en los dos casos, **exactamente la misma cantidad de parámetros**. Se
-//! enchufa en el mismo bloque, con la misma conv, el mismo FFN, las mismas
-//! normas y el mismo optimizador. Lo único que cambia es el mezclador temporal.
+//! THE COMPARISON IS FAIR BY CONSTRUCTION, which is the whole point: ClockMem
+//! has `wq, wk, wv, wg` and this has `wq, wk, wv, wo` -- four DxD matrices in
+//! both cases, **exactly the same number of parameters**. It plugs into the
+//! same block, with the same conv, the same FFN, the same norms and the same
+//! optimizer. The only thing that changes is the temporal mixer.
 //!
-//! Una sola cabeza a propósito, y no por pereza: ClockMem tampoco tiene
-//! cabezas. Partir esto en cabezas y aquello no compararía los dos mecanismos
-//! sino uno de ellos contra sí mismo con más maquinaria alrededor.
+//! A single head on purpose, not out of laziness: ClockMem doesn't have heads
+//! either. Splitting this into heads while leaving the other alone wouldn't
+//! compare the two mechanisms, it would compare one of them against itself
+//! with more machinery around it.
 //!
-//! La diferencia que se quiere ver es de fondo: acá el estado es una matriz
-//! SxS que se construye entera (O(S²) en cómputo y memoria) y puede hacer
-//! recuperación asociativa --clave A busca valor B--; ClockMem lleva un vector
-//! de D (O(S·D), O(D) en inferencia) y no puede. La pregunta es cuánto vale esa
-//! diferencia en pérdida real, no en principio.
+//! The difference we actually want to see is structural: here the state is
+//! an SxS matrix that gets built in full (O(S^2) in compute and memory) and
+//! can do associative retrieval --key A looks up value B--; ClockMem carries
+//! a D-sized vector (O(S*D), O(D) at inference) and can't. The question is
+//! how much that difference is worth in actual loss, not in principle.
 
 use crate::nn::{Linear, Module};
 use crate::rng::Rng;
@@ -40,8 +42,9 @@ impl Attention {
             wk: Linear::new(d, d, rng),
             wv: Linear::new(d, d, rng),
             wo: Linear::new(d, d, rng),
-            // 1/sqrt(d): sin esto los productos crecen con la dimensión, el
-            // softmax se satura y los gradientes se mueren antes de aprender.
+            // 1/sqrt(d): without this the dot products grow with the
+            // dimension, softmax saturates, and gradients die before
+            // learning anything.
             scale: 1.0 / (d as f32).sqrt(),
         }
     }
@@ -92,9 +95,9 @@ impl Module for Attention {
 }
 
 impl Attention {
-    /// Las cuatro proyecciones en orden, para no repetir la lista en cada
-    /// método. El orden es parte del formato de pesos: cambiarlo invalida los
-    /// checkpoints guardados.
+    /// The four projections in order, so the list doesn't need repeating in
+    /// every method. The order is part of the weight format: changing it
+    /// invalidates saved checkpoints.
     fn named(&self) -> [(&'static str, &Linear); 4] {
         [("wq", &self.wq), ("wk", &self.wk), ("wv", &self.wv), ("wo", &self.wo)]
     }

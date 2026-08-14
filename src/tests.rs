@@ -6,9 +6,9 @@ use crate::tensor::Tensor;
 fn numeric(t: &mut Tensor, f: impl Fn(&Tensor) -> f32, eps: f32) -> Vec<f32> {
     let mut out = vec![0.0; t.data.len()];
     for i in 0..t.data.len() {
-        // `make_mut` porque el buffer ahora se comparte con el grafo. Acá sí
-        // puede copiar la primera vez, y está bien: es el gradcheck, no el
-        // camino caliente.
+        // `make_mut` because the buffer is now shared with the graph. Here
+        // it's fine if it copies the first time: this is gradcheck, not the
+        // hot path.
         let orig = t.data[i];
         std::sync::Arc::make_mut(&mut t.data)[i] = orig + eps;
         let fp = f(t);
@@ -21,11 +21,11 @@ fn numeric(t: &mut Tensor, f: impl Fn(&Tensor) -> f32, eps: f32) -> Vec<f32> {
 }
 
 fn check(a: &[f32], b: &[f32], name: &str) {
-    assert_eq!(a.len(), b.len(), "len mismatch en {}", name);
+    assert_eq!(a.len(), b.len(), "len mismatch in {}", name);
     for i in 0..a.len() {
         let err = (a[i] - b[i]).abs();
         let scale = (a[i].abs() + b[i].abs()).max(1.0);
-        assert!(err / scale < 1e-3, "{}[{}]: analitico={} numerico={} err={}", name, i, a[i], b[i], err);
+        assert!(err / scale < 1e-3, "{}[{}]: analytic={} numeric={} err={}", name, i, a[i], b[i], err);
     }
 }
 
@@ -185,22 +185,23 @@ fn sum_of(t: &Tensor) -> f32 {
 
 #[test]
 fn gradcheck_stake_loss() {
-    // La cabeza de stake: derivadas analíticas contra numéricas en las tres
-    // entradas. Si el backward estuviera mal no fallaría nada en entrenamiento,
-    // sólo aprendería peor -- y el número que promete el 8 no valdría.
+    // The stake head: analytic derivatives against numeric ones on all
+    // three inputs. If the backward were wrong nothing would fail during
+    // training, it would just learn worse -- and the number #8 promises
+    // wouldn't be worth anything.
     let (s, d, span) = (8usize, 4usize, 4usize);
     let mut hidden = param((0..s * d).map(|i| 0.3 * (i % 5) as f32 - 0.4).collect(), vec![s, d]);
     let mut w = param(vec![0.2, -0.3, 0.5, 0.1], vec![d]);
     let mut b = param(vec![0.7], vec![1]);
-    let bien = vec![0.5, 0.25];
+    let good = vec![0.5, 0.25];
 
-    let loss = ops::stake_loss(&hidden, &w, &b, &bien, span);
+    let loss = ops::stake_loss(&hidden, &w, &b, &good, span);
     let grads = backward(&loss);
     let gh = grads.get(&hidden.id).cloned().unwrap();
     let gw = grads.get(&w.id).cloned().unwrap();
     let gb = grads.get(&b.id).cloned().unwrap();
 
-    let f = |h: &Tensor, ww: &Tensor, bb: &Tensor| sum_of(&ops::stake_loss(h, ww, bb, &bien, span));
+    let f = |h: &Tensor, ww: &Tensor, bb: &Tensor| sum_of(&ops::stake_loss(h, ww, bb, &good, span));
     let nh = numeric(&mut hidden, |h| f(h, &w, &b), 1e-3);
     let nw = numeric(&mut w, |ww| f(&hidden, ww, &b), 1e-3);
     let nb = numeric(&mut b, |bb| f(&hidden, &w, bb), 1e-3);
@@ -216,9 +217,10 @@ fn cm_sum(q: &Tensor, k: &Tensor, v: &Tensor, g: &Tensor, alpha: &Tensor, beta: 
 
 #[test]
 fn gradcheck_transpose_and_causal_softmax() {
-    // Las dos piezas que hicieron falta para armar la atención de contraste.
-    // Sin gradcheck no entran: una atención con el backward mal no falla, sólo
-    // aprende peor, y ahí la comparación con ClockMem miente a favor nuestro.
+    // The two pieces needed to build the reference attention. Without
+    // gradcheck they don't get in: an attention with a wrong backward
+    // doesn't fail, it just learns worse, and then the comparison with
+    // ClockMem lies in our favor.
     let mut x = param(vec![0.3, -1.2, 0.7, 2.1, -0.5, 0.9], vec![2, 3]);
     gradcheck_unary("transpose", &mut x, ops::transpose);
 
@@ -231,23 +233,23 @@ fn gradcheck_transpose_and_causal_softmax() {
 
 #[test]
 fn causal_softmax_does_not_look_ahead() {
-    // La propiedad que hace causal a la atención. Si esto falla, el modelo lee
-    // el futuro y su pérdida es una mentira preciosa.
+    // The property that makes attention causal. If this fails, the model
+    // reads the future and its loss is a beautiful lie.
     let x = param((0..16).map(|i| (i as f32) * 0.37 - 2.0).collect(), vec![4, 4]);
     let y = ops::softmax_causal(&x);
     for i in 0..4 {
         for j in (i + 1)..4 {
-            assert_eq!(0.0, y.data[i * 4 + j], "la fila {i} miró la columna {j}");
+            assert_eq!(0.0, y.data[i * 4 + j], "row {i} looked at column {j}");
         }
-        let fila: f32 = (0..=i).map(|j| y.data[i * 4 + j]).sum();
-        assert!((fila - 1.0).abs() < 1e-6, "la fila {i} no suma 1: {fila}");
+        let row: f32 = (0..=i).map(|j| y.data[i * 4 + j]).sum();
+        assert!((row - 1.0).abs() < 1e-6, "row {i} does not sum to 1: {row}");
     }
 }
 
 #[test]
 fn gradcheck_slice_rows() {
-    // El gradiente tiene que volver a las filas cortadas y NO a las de abajo.
-    // Sin esto, la tabla de posiciones entrena en silencio contra nada.
+    // The gradient has to reach the sliced rows and NOT the ones below.
+    // Without this, the position table trains silently against nothing.
     let mut x = param((0..12).map(|i| (i as f32) * 0.3 - 1.0).collect(), vec![4, 3]);
     gradcheck_unary("slice_rows", &mut x, |t| ops::slice_rows(t, 2));
 
@@ -255,16 +257,17 @@ fn gradcheck_slice_rows() {
         let y = ops::slice_rows(&x, 2);
         backward(&ops::sum_all(&y)).get(&x.id).cloned().unwrap()
     };
-    assert_eq!(vec![0.0; 6], g[6..].to_vec(), "llegó gradiente a filas que no se usaron");
+    assert_eq!(vec![0.0; 6], g[6..].to_vec(), "gradient reached rows that were not used");
 }
 
 #[test]
 fn gradcheck_clockmem_with_carried_state() {
-    // El caso que el gradcheck de siempre NO cubre: arrancar de un estado que
-    // viene de la ventana anterior. En t=0 el "estado previo" ya no es cero, y
-    // de eso depende el gradiente de alpha. Si eso quedara mal, alpha
-    // aprendería sesgado en el borde de cada ventana -- y nada fallaría: el
-    // modelo entrenaría igual, sólo que peor, y sin decir por qué.
+    // The case the usual gradcheck does NOT cover: starting from a state
+    // carried over from the previous window. At t=0 the "previous state"
+    // is no longer zero, and alpha's gradient depends on that. If that were
+    // wrong, alpha would learn with a bias at the boundary of each window
+    // -- and nothing would fail: the model would still train, just worse,
+    // without saying why.
     let (s, d) = (5, 3);
     let mut q = param((0..s * d).map(|i| (i as f32 - 7.0) / 10.0).collect(), vec![s, d]);
     let mut k = param((0..s * d).map(|i| (i as f32 * 1.7 - 4.0) / 11.0).collect(), vec![s, d]);
@@ -272,15 +275,15 @@ fn gradcheck_clockmem_with_carried_state() {
     let mut g = param((0..s * d).map(|i| ((i % 3) as f32 - 1.0) / 4.0).collect(), vec![s, d]);
     let mut alpha = param(vec![0.35, 0.6, 0.15], vec![d]);
     let mut beta = param(vec![0.9], vec![1]);
-    // Un estado inicial bien distinto de cero: si el backward lo ignorara, la
-    // diferencia se vería justo acá.
+    // An initial state clearly nonzero: if the backward ignored it, the
+    // difference would show up right here.
     let s0 = vec![0.8, -1.3, 0.45];
 
-    let corrida = |a: &Tensor, b: &Tensor, qq: &Tensor, kk: &Tensor, vv: &Tensor, gg: &Tensor| {
+    let run = |a: &Tensor, b: &Tensor, qq: &Tensor, kk: &Tensor, vv: &Tensor, gg: &Tensor| {
         ops::clockmem_from(qq, kk, vv, gg, a, b, &s0).0
     };
 
-    let out = corrida(&alpha, &beta, &q, &k, &v, &g);
+    let out = run(&alpha, &beta, &q, &k, &v, &g);
     let grads = backward(&ops::sum_all(&out));
     let ga = grads.get(&alpha.id).cloned().unwrap();
     let gb = grads.get(&beta.id).cloned().unwrap();
@@ -296,17 +299,18 @@ fn gradcheck_clockmem_with_carried_state() {
         sum_of(&ops::clockmem_from(p, &k.detach(), &v.detach(), &g.detach(), &alpha.detach(), &beta.detach(), &s0).0)
     }, 1e-3);
 
-    check(&ga, &na, "alpha con estado heredado");
-    check(&gb, &nb, "beta con estado heredado");
-    check(&gq, &nq, "q con estado heredado");
+    check(&ga, &na, "alpha with carried state");
+    check(&gb, &nb, "beta with carried state");
+    check(&gq, &nq, "q with carried state");
 }
 
 #[test]
 fn a_carried_state_actually_changes_the_output() {
-    // Control de que el estado inicial NO se esté ignorando en silencio. Sin
-    // esto, un `clockmem_from` que descartara s0 pasaría el gradcheck (el
-    // gradiente sería consistente con lo que calcula) y daría resultados
-    // idénticos al de siempre sin que nadie lo note.
+    // Control to make sure the initial state isn't being silently ignored.
+    // Without this, a `clockmem_from` that discarded s0 would still pass
+    // gradcheck (the gradient would be consistent with what it computes)
+    // and would give results identical to the usual ones without anyone
+    // noticing.
     let (s, d) = (4, 3);
     let q = param(vec![1.0; s * d], vec![s, d]);
     let k = param(vec![0.5; s * d], vec![s, d]);
@@ -315,10 +319,10 @@ fn a_carried_state_actually_changes_the_output() {
     let alpha = param(vec![0.9, 0.9, 0.9], vec![d]);
     let beta = param(vec![1.0], vec![1]);
 
-    let (cero, _) = ops::clockmem_from(&q, &k, &v, &g, &alpha, &beta, &vec![0.0; d]);
-    let (con, fin) = ops::clockmem_from(&q, &k, &v, &g, &alpha, &beta, &vec![2.0; d]);
+    let (zero, _) = ops::clockmem_from(&q, &k, &v, &g, &alpha, &beta, &vec![0.0; d]);
+    let (with, fin) = ops::clockmem_from(&q, &k, &v, &g, &alpha, &beta, &vec![2.0; d]);
 
-    assert!(cero.data[0] != con.data[0], "el estado inicial se está ignorando");
-    // Y el estado final tiene que salir distinto de cero para poder encadenar.
-    assert!(fin.iter().all(|v| *v != 0.0), "no devolvió estado final utilizable");
+    assert!(zero.data[0] != with.data[0], "the initial state is being ignored");
+    // And the final state has to come out nonzero to be chainable.
+    assert!(fin.iter().all(|v| *v != 0.0), "did not return a usable final state");
 }

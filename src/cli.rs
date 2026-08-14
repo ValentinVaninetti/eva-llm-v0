@@ -17,7 +17,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "info" => cmd_info(&args[1..]),
         "gpu" => cmd_gpu(&args[1..]),
         "recall" => cmd_recall(&args[1..]),
-        "techo" => cmd_techo(&args[1..]),
+        "ceiling" => cmd_ceiling(&args[1..]),
         "bet" => cmd_bet(&args[1..]),
         "stake" => cmd_stake(&args[1..]),
         "settle" => cmd_settle(&args[1..]),
@@ -25,13 +25,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
             print_help();
             Ok(())
         }
-        other => Err(format!("comando desconocido: {} (usá `eva help`)", other)),
+        other => Err(format!("unknown command: {} (try `eva help`)", other)),
     }
 }
 
 fn cmd_train(args: &[String]) -> Result<(), String> {
     check_unknown(args, &["data", "dim", "ffn", "blocks", "kernel", "eps", "seq", "arch", "epochs", "lr", "wd", "seed", "log", "out", "resume", "val", "surprise", "local", "persist", "inorder", "gate-beta", "destroy-p"])?;
-    let data = flag(args, "data").ok_or("train requiere --data <archivo>")?;
+    let data = flag(args, "data").ok_or("train requires --data <file>")?;
     let mcfg = EvaConfig {
         vocab: 256,
         dim: flag_num(args, "dim", 256)?,
@@ -64,7 +64,7 @@ fn cmd_train(args: &[String]) -> Result<(), String> {
 
 fn cmd_gen(args: &[String]) -> Result<(), String> {
     check_unknown(args, &["weights", "prompt", "tokens", "temp", "topk", "seed"])?;
-    let weights = flag(args, "weights").ok_or("gen requiere --weights <archivo>")?;
+    let weights = flag(args, "weights").ok_or("gen requires --weights <file>")?;
     let model = load_model(&weights).map_err(|e| e.to_string())?;
     let prompt = flag(args, "prompt").unwrap_or_default();
     let prompt = if prompt.is_empty() { " ".to_string() } else { prompt };
@@ -82,238 +82,240 @@ fn cmd_gen(args: &[String]) -> Result<(), String> {
 
 fn cmd_info(args: &[String]) -> Result<(), String> {
     check_unknown(args, &["weights"])?;
-    let weights = flag(args, "weights").ok_or("info requiere --weights <archivo>")?;
+    let weights = flag(args, "weights").ok_or("info requires --weights <file>")?;
     let model = load_model(&weights).map_err(|e| e.to_string())?;
     println!("{}", describe(&model));
     Ok(())
 }
 
-/// Mide si un modelo chico MÁS una tabla de k-gramas alcanza a uno grande.
+/// Measures whether a small model PLUS a k-gram table reaches a large one.
 ///
-/// Tres particiones y no dos: el peso de mezcla se elige sobre DESARROLLO y se
-/// reporta sobre VALIDACIÓN. Elegir lambda mirando validación sería ajustar
-/// contra el examen -- daría el mejor número posible y no significaría nada.
+/// Three splits and not two: the mixing weight is chosen on DEVELOPMENT and
+/// reported on VALIDATION. Choosing lambda while looking at validation
+/// would be tuning against the exam -- it would give the best possible
+/// number and mean nothing.
 fn cmd_recall(args: &[String]) -> Result<(), String> {
     check_unknown(args, &["weights", "data", "seq"])?;
-    let weights = flag(args, "weights").ok_or("recall requiere --weights")?;
-    let data = flag(args, "data").ok_or("recall requiere --data")?;
+    let weights = flag(args, "weights").ok_or("recall requires --weights")?;
+    let data = flag(args, "data").ok_or("recall requires --data")?;
     let model = load_model(&weights).map_err(|e| e.to_string())?;
     let seq = flag_num(args, "seq", model.cfg.seq_len)?;
 
     let ds = crate::data::TextDataset::from_file(&data, seq).map_err(|e| e.to_string())?;
     let n = ds.num_windows();
-    // 80 / 10 / 10, contiguo. El modelo tiene que haberse entrenado con
-    // --val 0.2 para que no haya visto ni desarrollo ni validación.
-    let fin_train = n * 8 / 10;
-    let fin_dev = n * 9 / 10;
+    // 80 / 10 / 10, contiguous. The model has to have been trained with
+    // --val 0.2 so it never saw development or validation.
+    let end_train = n * 8 / 10;
+    let end_dev = n * 9 / 10;
 
-    let bytes_train: Vec<usize> = ds.ids[..fin_train * seq].to_vec();
-    let tabla = crate::recall::Recall::build(&bytes_train);
-    println!("modelo {} params | tabla {} entradas, ~{:.1} KB",
-        model.param_count(), tabla.entries(), tabla.bytes() as f64 / 1024.0);
+    let bytes_train: Vec<usize> = ds.ids[..end_train * seq].to_vec();
+    let table = crate::recall::Recall::build(&bytes_train);
+    println!("model {} params | table {} entries, ~{:.1} KB",
+        model.param_count(), table.entries(), table.bytes() as f64 / 1024.0);
 
-    let evaluar = |desde: usize, hasta: usize, lambda: f32| -> (f32, f32) {
-        let mut suma = 0.0;
-        let mut cuenta = 0;
-        let mut cob = (0usize, 0usize);
-        for wi in desde..hasta {
+    let evaluate = |from: usize, to: usize, lambda: f32| -> (f32, f32) {
+        let mut sum = 0.0;
+        let mut count = 0;
+        let mut cov = (0usize, 0usize);
+        for wi in from..to {
             let (input, target) = ds.window(wi);
             let logits = model.forward(&input);
-            let antes: Vec<usize> = if wi == 0 { Vec::new() } else { ds.ids[..wi * seq].to_vec() };
-            suma += crate::recall::mixed_loss(
-                &logits.data, model.cfg.vocab, &antes, &target, &tabla, lambda, &mut cob);
-            cuenta += 1;
+            let before: Vec<usize> = if wi == 0 { Vec::new() } else { ds.ids[..wi * seq].to_vec() };
+            sum += crate::recall::mixed_loss(
+                &logits.data, model.cfg.vocab, &before, &target, &table, lambda, &mut cov);
+            count += 1;
         }
-        (suma / cuenta as f32, 100.0 * cob.0 as f32 / cob.1.max(1) as f32)
+        (sum / count as f32, 100.0 * cov.0 as f32 / cov.1.max(1) as f32)
     };
 
-    // Barrido sobre DESARROLLO.
-    let mut mejor = (0.0f32, f32::INFINITY);
-    println!("  lambda   desarrollo");
-    for paso in 0..=10 {
-        let l = paso as f32 * 0.05;
-        let (p, _) = evaluar(fin_train, fin_dev, l);
+    // Sweep over DEVELOPMENT.
+    let mut best = (0.0f32, f32::INFINITY);
+    println!("  lambda   development");
+    for step in 0..=10 {
+        let l = step as f32 * 0.05;
+        let (p, _) = evaluate(end_train, end_dev, l);
         println!("   {l:.2}     {p:.4}");
-        if p < mejor.1 {
-            mejor = (l, p);
+        if p < best.1 {
+            best = (l, p);
         }
     }
 
-    // Y una sola pasada por VALIDACIÓN, con el lambda ya elegido.
-    let (solo, cobertura) = evaluar(fin_dev, n, 0.0);
-    let (con, _) = evaluar(fin_dev, n, mejor.0);
+    // And a single pass over VALIDATION, with lambda already chosen.
+    let (alone, coverage) = evaluate(end_dev, n, 0.0);
+    let (with, _) = evaluate(end_dev, n, best.0);
     let bpb = |x: f32| x / std::f32::consts::LN_2;
-    println!("\nVALIDACIÓN (lambda {:.2} elegido en desarrollo)", mejor.0);
-    println!("  modelo solo      {:.4}  |  {:.3} bits/byte", solo, bpb(solo));
-    println!("  modelo + tabla   {:.4}  |  {:.3} bits/byte", con, bpb(con));
-    println!("  mejora           {:.1}%", 100.0 * (solo - con) / solo);
-    // Si esto es casi 100%, el texto de prueba se parece demasiado al
-    // guardado y el resultado no se sostendría con texto nuevo.
-    println!("  la tabla tuvo algo que decir en el {cobertura:.1}% de las posiciones");
-    let perfil: Vec<String> = tabla
+    println!("\nVALIDATION (lambda {:.2} chosen on development)", best.0);
+    println!("  model alone      {:.4}  |  {:.3} bits/byte", alone, bpb(alone));
+    println!("  model + table    {:.4}  |  {:.3} bits/byte", with, bpb(with));
+    println!("  improvement      {:.1}%", 100.0 * (alone - with) / alone);
+    // If this is close to 100%, the test text is too similar to what was
+    // stored and the result wouldn't hold up on new text.
+    println!("  the table had something to say for {coverage:.1}% of the positions");
+    let profile: Vec<String> = table
         .hit_profile()
         .iter()
         .filter(|(_, p)| *p > 0.05)
         .map(|(k, p)| format!("{k}:{p:.0}%"))
         .collect();
-    println!("  de dónde vienen los aciertos: {}", perfil.join("  "));
+    println!("  where the hits come from: {}", profile.join("  "));
     Ok(())
 }
 
-/// 7. EL TECHO — el primer número del cómputo por influencia.
+/// 7. THE CEILING -- the first number of compute-by-influence.
 ///
-/// Mide, sobre texto que no vio, cuánto cuesta quitar cada bloque por
-/// separado: si hay un bloque que se puede saltar perdiendo poco, hay espacio
-/// real para un mecanismo que lo anticipe; si quitar cualquiera destruye la
-/// calidad, la línea muere acá sin escribir el planificador.
-fn cmd_techo(args: &[String]) -> Result<(), String> {
+/// Measures, on unseen text, how much it costs to remove each block on its
+/// own: if there's a block that can be skipped while losing little, there's
+/// real room for a mechanism that anticipates it; if removing any of them
+/// destroys quality, the line dies here without ever writing the scheduler.
+fn cmd_ceiling(args: &[String]) -> Result<(), String> {
     check_unknown(args, &["weights", "data", "val", "skip"])?;
-    let weights = flag(args, "weights").ok_or("techo requiere --weights")?;
-    let data = flag(args, "data").ok_or("techo requiere --data")?;
+    let weights = flag(args, "weights").ok_or("ceiling requires --weights")?;
+    let data = flag(args, "data").ok_or("ceiling requires --data")?;
     let model = load_model(&weights).map_err(|e| e.to_string())?;
     let val: f32 = flag_num(args, "val", 0.1)?;
 
     let ds = crate::data::TextDataset::from_file(&data, model.cfg.seq_len).map_err(|e| e.to_string())?;
     let n = ds.num_windows();
     if n == 0 {
-        return Err("el dataset es muy chico para el seq_len del modelo".into());
+        return Err("the dataset is too small for the model's seq_len".into());
     }
     let n_val = (((n as f32) * val).round() as usize).clamp(1, n / 2);
     let n_train = n - n_val;
 
     if let Some(raw) = flag(args, "skip") {
         let mut skips: Vec<usize> = raw.split(',').map(|s| s.trim().parse::<usize>()
-            .map_err(|_| format!("--skip inválido: '{raw}' (ejemplo: 2,3,4)")))
+            .map_err(|_| format!("invalid --skip: '{raw}' (example: 2,3,4)")))
             .collect::<Result<_, _>>()?;
         skips.sort_unstable();
         if skips.windows(2).any(|w| w[0] == w[1]) {
-            return Err("--skip no puede repetir bloques".into());
+            return Err("--skip cannot repeat blocks".into());
         }
-        println!("eva: el modelo tiene que haberse entrenado con --val {val:.1} para no haber visto validación");
-        let r = crate::techo::medir_combinacion(&model, &ds, n_train, n, &skips)?;
-        println!("eva: COMBINACIÓN REAL, bloques omitidos {:?} (una pasada)", r.skips);
-        println!("  completo       {:.4} bits/byte | {:.2} ms", r.full_bits_per_byte, r.full_time_s * 1e3);
-        println!("  combinación    {:.4} bits/byte | {:+.4} ({:+.1}%) | argmax cambia {:.1}%",
+        println!("eva: the model has to have been trained with --val {val:.1} to not have seen validation");
+        let r = crate::ceiling::measure_combo(&model, &ds, n_train, n, &skips)?;
+        println!("eva: REAL COMBINATION, blocks skipped {:?} (one pass)", r.skips);
+        println!("  full           {:.4} bits/byte | {:.2} ms", r.full_bits_per_byte, r.full_time_s * 1e3);
+        println!("  combination    {:.4} bits/byte | {:+.4} ({:+.1}%) | argmax changes {:.1}%",
             r.bits_per_byte, r.delta_bits, 100.0 * r.rel_delta, 100.0 * r.pred_change);
-        println!("  tiempo real    {:.2} ms | ahorro real {:.1}% | pesos no leídos {:.1} KB",
+        println!("  real time      {:.2} ms | real savings {:.1}% | weights not read {:.1} KB",
             r.time_total_s * 1e3, 100.0 * (r.full_time_s - r.time_total_s) / r.full_time_s.max(1e-12),
             r.weight_bytes as f64 / 1024.0);
         return Ok(());
     }
-    println!("eva: modelo {} params | {} bloques | arch {} | dim {} ffn {} kernel {} | seq {}",
+    println!("eva: model {} params | {} blocks | arch {} | dim {} ffn {} kernel {} | seq {}",
         model.param_count(), model.blocks.len(), model.cfg.arch.name(),
         model.cfg.dim, model.cfg.ffn_dim, model.cfg.conv_kernel, model.cfg.seq_len);
-    println!("eva: {} ventanas, {} entrenadas, {} validación (corte contiguo al final)",
+    println!("eva: {} windows, {} trained, {} validation (contiguous cut at the end)",
         n, n_train, n_val);
-    println!("eva: el modelo tiene que haberse entrenado con --val {val:.1} para no haber visto validación");
-    println!("eva: cada variante se corre una vez por ventana, estado en cero (convención de bet)");
+    println!("eva: the model has to have been trained with --val {val:.1} to not have seen validation");
+    println!("eva: each variant runs once per window, state at zero (bet's convention)");
 
-    let rep = crate::techo::medir(&model, &ds, n_train, n)?;
+    let rep = crate::ceiling::measure(&model, &ds, n_train, n)?;
 
-    println!("\n=== TECNO RETROSPECTIVO (un bloque afuera por vez, texto no visto) ===");
-    println!("  {n_val} ventanas, {} posiciones | completo {:.4} bits/byte en {:.2} ms",
+    println!("\n=== RETROSPECTIVE CEILING (one block out at a time, unseen text) ===");
+    println!("  {n_val} windows, {} positions | full {:.4} bits/byte in {:.2} ms",
         rep.n_pos, rep.full_bits_per_byte, rep.full_time_s * 1e3);
-    println!("  variante       bits/byte   Δ bits/byte   pred cambia   tiempo     ahorra   pesos no leídos");
-    println!("  completo       {:.4}         —              —          {:6.2} ms      —          —",
+    println!("  variant        bits/byte   D bits/byte   pred changes   time       saves   weights not read");
+    println!("  full           {:.4}         -              -          {:6.2} ms      -          -",
         rep.full_bits_per_byte, rep.full_time_s * 1e3);
     for b in &rep.blocks {
-        println!("  sin bloque {:<2}    {:.4}      {:+.4} ({:+.1}%)   {:6.1}%     {:6.2} ms  {:5.1}%     {:6.1} KB",
+        println!("  without block {:<2}    {:.4}      {:+.4} ({:+.1}%)   {:6.1}%     {:6.2} ms  {:5.1}%     {:6.1} KB",
             b.idx, b.bits_per_byte, b.delta_bits, 100.0 * b.rel_delta,
             100.0 * b.pred_change, b.time_total_s * 1e3,
             100.0 * b.block_time_s / rep.full_time_s,
             b.weight_bytes as f64 / 1024.0);
     }
 
-    println!("\n=== REGLAS IDEALES (retrospectivas — el techo máximo, no lo que un centinela lograría) ===");
-    println!("  la pérdida proyectada de saltar varios es la SUMA de las individuales; la combinación");
-    println!("  junta se corre aparte si el techo da. Cada bloque cuesta lo mismo en pesos.");
-    for umbral in [0.01f32, 0.02, 0.05] {
-        let (_, t, w, proyectado) = crate::techo::regla_ideal(&rep, umbral);
-        let quien: Vec<String> = rep
+    println!("\n=== IDEAL RULES (retrospective -- the maximum ceiling, not what a runtime gate would achieve) ===");
+    println!("  the projected loss of skipping several is the SUM of the individual ones; the combined");
+    println!("  run gets checked separately if the ceiling looks good. Each block costs the same in weights.");
+    for threshold in [0.01f32, 0.02, 0.05] {
+        let (_, t, w, projected) = crate::ceiling::ideal_rule(&rep, threshold);
+        let who: Vec<String> = rep
             .blocks
             .iter()
-            .filter(|b| b.rel_delta <= umbral)
+            .filter(|b| b.rel_delta <= threshold)
             .map(|b| format!("b{}", b.idx))
             .collect();
-        let quien = if quien.is_empty() { "ninguno".to_string() } else { quien.join(", ") };
-        println!("  pérdida ≤ {:>3.0}%  → salta [{}]  ahorra {t:5.1}% del tiempo, {w:4.1}% del peso | proyectado {proyectado:.4} bits/byte",
-            100.0 * umbral, quien);
+        let who = if who.is_empty() { "none".to_string() } else { who.join(", ") };
+        println!("  loss <= {:>3.0}%  -> skips [{}]  saves {t:5.1}% of time, {w:4.1}% of weight | projected {projected:.4} bits/byte",
+            100.0 * threshold, who);
     }
 
-    let (saltar, t, _, _) = crate::techo::regla_ideal(&rep, 0.05);
-    if saltar > 0 {
-        println!("\n  VEREDICTO: hay bloque(s) que se pueden saltar perdiendo ≤5% de bits/byte →");
-        println!("  espacio real para cómputo condicional (techo {t:.1}% del tiempo).");
-        println!("  Siguiente paso: cómo anticipar la influencia sin pagar el bloque.");
+    let (skip, t, _, _) = crate::ceiling::ideal_rule(&rep, 0.05);
+    if skip > 0 {
+        println!("\n  VERDICT: there are block(s) that can be skipped for <=5% bits/byte loss ->");
+        println!("  real room for conditional compute (ceiling {t:.1}% of time).");
+        println!("  Next step: how to anticipate influence without paying for the block.");
     } else {
-        println!("\n  VEREDICTO: quitar cualquier bloque cuesta más del 5% de bits/byte →");
-        println!("  techo bajo, la línea del cómputo condicional muere acá.");
+        println!("\n  VERDICT: removing any block costs more than 5% bits/byte ->");
+        println!("  low ceiling, the conditional compute line dies here.");
     }
     Ok(())
 }
 
-/// 8. QUE APUESTE — el primer número que lo mata.
+/// 8. THAT IT BETS -- the first number that kills it.
 ///
-/// Mide si la confianza que el modelo DECLARA rastrea lo que realmente
-/// acierta, sobre texto que no vio. El corte es el mismo contiguo que usó
-/// `train`: las últimas `--val` ventanas son el examen, nunca tocadas.
+/// Measures whether the confidence the model DECLARES tracks what it
+/// actually gets right, on unseen text. The cut is the same contiguous one
+/// `train` used: the last `--val` windows are the exam, never touched.
 fn cmd_bet(args: &[String]) -> Result<(), String> {
     check_unknown(args, &["weights", "data", "seq", "val", "bins", "train"])?;
-    let weights = flag(args, "weights").ok_or("bet requiere --weights")?;
-    let data = flag(args, "data").ok_or("bet requiere --data")?;
+    let weights = flag(args, "weights").ok_or("bet requires --weights")?;
+    let data = flag(args, "data").ok_or("bet requires --data")?;
     let model = load_model(&weights).map_err(|e| e.to_string())?;
     let seq = flag_num(args, "seq", model.cfg.seq_len)?;
     let val: f32 = flag_num(args, "val", 0.1)?;
     let bins = flag_num(args, "bins", 10)?;
-    let medir_train = args.iter().any(|a| a == "--train");
+    let measure_train = args.iter().any(|a| a == "--train");
 
     let ds = crate::data::TextDataset::from_file(&data, seq).map_err(|e| e.to_string())?;
     let n = ds.num_windows();
     if n == 0 {
-        return Err("el dataset es muy chico para el seq_len del modelo".into());
+        return Err("the dataset is too small for the model's seq_len".into());
     }
     let n_val = (((n as f32) * val).round() as usize).clamp(1, n / 2);
     let n_train = n - n_val;
-    println!("eva: {} ventanas, {} entrenadas, {} validación (corte contiguo al final)",
+    println!("eva: {} windows, {} trained, {} validation (contiguous cut at the end)",
         n, n_train, n_val);
-    println!("eva: el modelo tiene que haberse entrenado con --val {val:.1} para no haber visto validación");
+    println!("eva: the model has to have been trained with --val {val:.1} to not have seen validation");
 
-    if medir_train {
+    if measure_train {
         let t = crate::bet::measure(&model, &ds, 0, n_train, bins);
-        print_calibration(&t, "ENTRENAMIENTO (texto que el modelo SÍ vio)", bins);
+        print_calibration(&t, "TRAINING (text the model DID see)", bins);
     }
     let obs = crate::bet::scan(&model, &ds, n_train, n);
     let mut cal = crate::bet::Calibration::new(bins);
     for o in &obs {
         cal.add(o.conf, o.margin, o.correct, o.p_target);
     }
-    print_calibration(&cal, "VALIDACIÓN (texto que el modelo NO vio)", bins);
+    print_calibration(&cal, "VALIDATION (text the model did NOT see)", bins);
 
-    println!("\n=== TRAMOS (¿la confianza del tramo se predice con lo que ya hay?) ===");
-    println!("  bien = fracción de posiciones acertadas dentro del tramo");
-    println!("  r(media) = promedio de p[argmax]   r(min) = eslabón débil");
-    println!("  r(geo_verdad) = p[verdad] del tramo (TECHO, usa la respuesta)");
-    println!("  r(geo_argmax) = p[argmax] del tramo (VARA usable al generar)");
-    println!("  r(magnitud) = largo del vector AL ARRANCAR");
+    println!("\n=== SPANS (can a span's confidence be predicted from what's already there?) ===");
+    println!("  good = fraction of correct positions within the span");
+    println!("  r(mean) = average of p[argmax]   r(min) = weakest link");
+    println!("  r(geo_truth) = p[truth] of the span (CEILING, uses the answer)");
+    println!("  r(geo_argmax) = p[argmax] of the span (BAR usable at generation)");
+    println!("  r(magnitude) = length of the vector AT THE START");
     for &l in &[8usize, 16, 32] {
         let s = crate::bet::span_analysis(&obs, model.cfg.seq_len, l);
-        println!("  tramo {l:>2}: n={:>5}  bien {:.1}%  | r(media) {:.3}  r(min) {:.3}  r(geo_verdad) {:.3}  r(geo_argmax) {:.3}  r(magnitud) {:.3}",
-            s.n, 100.0 * s.bien_global, s.r_media, s.r_min, s.r_geomean, s.r_geomean_argmax, s.r_magnitud);
+        println!("  span {l:>2}: n={:>5}  good {:.1}%  | r(mean) {:.3}  r(min) {:.3}  r(geo_truth) {:.3}  r(geo_argmax) {:.3}  r(magnitude) {:.3}",
+            s.n, 100.0 * s.good_global, s.r_media, s.r_min, s.r_geomean, s.r_geomean_argmax, s.r_magnitude);
     }
     Ok(())
 }
 
-/// 8. QUE APUESTE — el experimento decisivo: la cabeza de stake.
+/// 8. THAT IT BETS -- the decisive experiment: the stake head.
 ///
-/// Entrena una SONDA (proyección lineal del estado oculto al arrancar el tramo)
-/// sobre un modelo ya entrenado y congelado, y la mide en la misma validación
-/// que `bet`: ¿r(stake vs bien) supera la vara libre (media p[argmax] ≈ 0.67)?
-/// Si no la supera, la apuesta se hace gratis con la geomean y el 8 se cierra.
-/// Si la supera, la señal existe antes de gastar y la cabeza vale su costo.
+/// Trains a PROBE (linear projection of the hidden state at the start of
+/// the span) over an already-trained, frozen model, and measures it on the
+/// same validation as `bet`: does r(stake vs good) beat the free bar (mean
+/// p[argmax] approx 0.67)? If it doesn't beat it, the bet is done for free
+/// with the geomean and #8 closes. If it does, the signal exists before
+/// spending anything and the head earns its cost.
 fn cmd_stake(args: &[String]) -> Result<(), String> {
     check_unknown(args, &["weights", "data", "val", "span", "epochs", "lr", "seed", "norm"])?;
-    let weights = flag(args, "weights").ok_or("stake requiere --weights")?;
-    let data = flag(args, "data").ok_or("stake requiere --data")?;
+    let weights = flag(args, "weights").ok_or("stake requires --weights")?;
+    let data = flag(args, "data").ok_or("stake requires --data")?;
     let model = load_model(&weights).map_err(|e| e.to_string())?;
     let span = flag_num(args, "span", 16)?;
     let epochs = flag_num(args, "epochs", 1)?;
@@ -325,49 +327,49 @@ fn cmd_stake(args: &[String]) -> Result<(), String> {
     let ds = crate::data::TextDataset::from_file(&data, model.cfg.seq_len).map_err(|e| e.to_string())?;
     let n = ds.num_windows();
     if n == 0 {
-        return Err("el dataset es muy chico para el seq_len del modelo".into());
+        return Err("the dataset is too small for the model's seq_len".into());
     }
     let n_val = (((n as f32) * val).round() as usize).clamp(1, n / 2);
     let n_train = n - n_val;
-    println!("eva: modelo {} params | cabeza {} params (w+b) | sonda sobre estado {}",
-        model.param_count(), model.cfg.dim + 1, if post_norm { "POST-norma" } else { "PRE-norma" });
-    println!("eva: {} ventanas, {} entrenan la sonda, {} validación (mismo corte contiguo que bet)",
+    println!("eva: model {} params | head {} params (w+b) | probe over {} state",
+        model.param_count(), model.cfg.dim + 1, if post_norm { "POST-norm" } else { "PRE-norm" });
+    println!("eva: {} windows, {} train the probe, {} validation (same contiguous cut as bet)",
         n, n_train, n_val);
-    println!("eva: tramo = {span} posiciones, el modelo queda congelado (hidden detached)");
+    println!("eva: span = {span} positions, the model stays frozen (hidden detached)");
 
-    let (r_train, r_stake, n_tramos) =
-        crate::stake::entrenar_y_medir(&model, &ds, n_train, n_val, span, epochs, lr, seed, post_norm);
+    let (r_train, r_stake, n_spans) =
+        crate::stake::train_and_measure(&model, &ds, n_train, n_val, span, epochs, lr, seed, post_norm);
 
-    // Las varas libres, medidas con la misma maquinaria que bet, sobre el
-    // mismo corte. La cabeza tiene que superar la vara; acercarse al techo es
+    // The free bars, measured with the same machinery as bet, on the same
+    // cut. The head has to beat the bar; getting close to the ceiling is a
     // bonus.
     let obs = crate::bet::scan(&model, &ds, n_train, n);
     let s = crate::bet::span_analysis(&obs, model.cfg.seq_len, span);
-    println!("\n=== EL NÚMERO ===");
-    println!("  r(stake vs bien)   = {r_stake:.3}  (la cabeza, antes de gastar; train {r_train:.3})");
-    println!("  r(media p[argmax]) = {:.3}  (VARA usable post-hoc)", s.r_media);
-    println!("  r(geo p[verdad])   = {:.3}  (TECHO, usa la respuesta)", s.r_geomean);
-    println!("  r(magnitud)        = {:.3}  (la señal gratis que NO existe)", s.r_magnitud);
-    let voto = if r_stake > s.r_media {
-        format!("LA CABEZA SUPERA LA VARA {:.3} -> la apuesta por tramo vive", s.r_media)
+    println!("\n=== THE NUMBER ===");
+    println!("  r(stake vs good)   = {r_stake:.3}  (the head, before spending; train {r_train:.3})");
+    println!("  r(mean p[argmax])  = {:.3}  (usable post-hoc BAR)", s.r_media);
+    println!("  r(geo p[truth])    = {:.3}  (CEILING, uses the answer)", s.r_geomean);
+    println!("  r(magnitude)       = {:.3}  (the free signal that does NOT exist)", s.r_magnitude);
+    let verdict = if r_stake > s.r_media {
+        format!("THE HEAD BEATS THE BAR {:.3} -> the per-span bet lives", s.r_media)
     } else {
-        format!("LA CABEZA NO SUPERA LA VARA {:.3} -> la apuesta se hace gratis con la media", s.r_media)
+        format!("THE HEAD DOES NOT BEAT THE BAR {:.3} -> the bet is done for free with the mean", s.r_media)
     };
-    println!("  VEREDICTO ({n_tramos} tramos): {voto}");
+    println!("  VERDICT ({n_spans} spans): {verdict}");
     Ok(())
 }
 
-/// 9. CONGELAR Y DESCONGELAR — el primer número que lo mata.
+/// 9. FREEZE AND UNFREEZE -- the first number that kills it.
 ///
-/// Mide, ventana a ventana, qué fracción de los parámetros se queda quieta
-/// VARIAS ventanas seguidas (no una sola vez -- eso pasa todo el tiempo por
-/// ruido y no dice nada). Si esa fracción es cero o no crece con el
-/// entrenamiento, no hay nada que congelar y el punto 9 se cierra sin escribir
-/// el mecanismo.
+/// Measures, window by window, what fraction of the parameters stay still
+/// for SEVERAL consecutive windows (not just once -- that happens all the
+/// time from noise and means nothing). If that fraction is zero or doesn't
+/// grow with training, there's nothing to freeze and point 9 closes without
+/// ever writing the mechanism.
 fn cmd_settle(args: &[String]) -> Result<(), String> {
     check_unknown(args, &["data", "dim", "ffn", "blocks", "seq", "epochs", "lr", "wd", "seed", "val", "every", "streak"])?;
     let cfg = crate::settle::SettleConfig {
-        data_path: flag(args, "data").ok_or("settle requiere --data <archivo>")?,
+        data_path: flag(args, "data").ok_or("settle requires --data <file>")?,
         dim: flag_num(args, "dim", 256)?,
         ffn: flag_num(args, "ffn", 512)?,
         blocks: flag_num(args, "blocks", 4)?,
@@ -383,10 +385,10 @@ fn cmd_settle(args: &[String]) -> Result<(), String> {
     crate::settle::run(&cfg)
 }
 
-fn print_calibration(cal: &crate::bet::Calibration, titulo: &str, bins: usize) {
+fn print_calibration(cal: &crate::bet::Calibration, title: &str, bins: usize) {
     let acc = cal.accuracy();
-    println!("\n=== {titulo} ===");
-    println!("  {:<4} {:>8} {:>10} {:>10}", "bin", "n", "conf", "acierto");
+    println!("\n=== {title} ===");
+    println!("  {:<4} {:>8} {:>10} {:>10}", "bin", "n", "conf", "accuracy");
     for b in 0..bins {
         if cal.bin_n(b) == 0 {
             continue;
@@ -394,21 +396,21 @@ fn print_calibration(cal: &crate::bet::Calibration, titulo: &str, bins: usize) {
         println!("  {:<4} {:>8} {:>10.3} {:>10.1}%",
             b, cal.bin_n(b), cal.bin_conf(b), 100.0 * cal.bin_accuracy(b));
     }
-    println!("  acierto global {:.1}%  |  ECE {:.3}", 100.0 * acc, cal.ece());
-    println!("  r(conf media vs acierto por bin) = {:.3}", cal.bin_corr());
+    println!("  overall accuracy {:.1}%  |  ECE {:.3}", 100.0 * acc, cal.ece());
+    println!("  r(mean conf vs accuracy per bin) = {:.3}", cal.bin_corr());
     if let Some((top, bottom)) = cal.top_vs_bottom() {
-        println!("  acierto bin más seguro {:.1}%  vs  bin menos seguro {:.1}%",
+        println!("  accuracy of most confident bin {:.1}%  vs  least confident bin {:.1}%",
             100.0 * top, 100.0 * bottom);
     }
-    println!("  r(margen vs acierto) = {:.3}", cal.margin_r());
+    println!("  r(margin vs accuracy) = {:.3}", cal.margin_r());
     let (yes, no) = cal.pt_calibration();
-    println!("  p(verdad) cuando acierta {:.3}  vs  cuando no {:.3}", yes, no);
+    println!("  p(truth) when correct {:.3}  vs  when not {:.3}", yes, no);
     let r = cal.bin_corr();
-    let voto = match (r, cal.top_vs_bottom()) {
-        (r, Some((top, bottom))) if r >= 0.5 && top > bottom => "LA CONFIANZA RASTREA EL ACIERTO -> el 8 vive",
-        _ => "LA CONFIANZA NO RASTREA EL ACIERTO -> el 8 muere acá",
+    let verdict = match (r, cal.top_vs_bottom()) {
+        (r, Some((top, bottom))) if r >= 0.5 && top > bottom => "CONFIDENCE TRACKS ACCURACY -> #8 lives",
+        _ => "CONFIDENCE DOES NOT TRACK ACCURACY -> #8 dies here",
     };
-    println!("  VEREDICTO: {voto}");
+    println!("  VERDICT: {verdict}");
 }
 
 fn cmd_gpu(args: &[String]) -> Result<(), String> {
@@ -433,40 +435,41 @@ fn cmd_gpu(args: &[String]) -> Result<(), String> {
     let a: Vec<f32> = (0..m * k).map(|_| rng.uniform(-1.0, 1.0)).collect();
     let b: Vec<f32> = (0..k * n).map(|_| rng.uniform(-1.0, 1.0)).collect();
 
-    // La primera llamada carga con la creación de los buffers; el resto es lo
-    // que ve un entrenamiento, que multiplica las mismas formas miles de veces.
-    // Medir una sola vez mezclaba las dos cosas en un número que no era ninguna.
+    // The first call is loaded down with buffer creation; the rest is what
+    // a training run sees, multiplying the same shapes thousands of times.
+    // Measuring only once mixed the two things into a number that was
+    // neither.
     let mut c = Vec::new();
-    let (gpu_frio, gpu_regimen) = timed(iters, || {
+    let (gpu_cold, gpu_steady) = timed(iters, || {
         c = gpu.matmul(&a, &b, m, k, n)?;
         Ok(())
     })?;
 
     let mut cref = vec![0.0f32; m * n];
-    let (_, cpu_regimen) = timed(iters, || {
+    let (_, cpu_steady) = timed(iters, || {
         crate::math::matmul(&a, &b, m, k, n, &mut cref);
         Ok(())
     })?;
 
     let max_err = c.iter().zip(&cref).fold(0.0f32, |w, (x, y)| w.max((x - y).abs()));
     println!(
-        "matmul {m}x{k}x{n} ({iters} corridas)\n  \
-         GPU  {:7.3} ms  (primera {:7.3} ms, con la creación de buffers)\n  \
+        "matmul {m}x{k}x{n} ({iters} runs)\n  \
+         GPU  {:7.3} ms  (first {:7.3} ms, including buffer creation)\n  \
          CPU  {:7.3} ms\n  \
          max_err {max_err:.2e}",
-        ms(gpu_regimen),
-        ms(gpu_frio),
-        ms(cpu_regimen),
+        ms(gpu_steady),
+        ms(gpu_cold),
+        ms(cpu_steady),
     );
     if max_err > 1e-2 {
-        return Err(format!("el matmul de GPU difiere del CPU: max_err {max_err:.2e}"));
+        return Err(format!("GPU matmul differs from CPU: max_err {max_err:.2e}"));
     }
-    let (rapido, lento, veces) = if gpu_regimen < cpu_regimen {
-        ("GPU", "CPU", ms(cpu_regimen) / ms(gpu_regimen))
+    let (fast, slow, times) = if gpu_steady < cpu_steady {
+        ("GPU", "CPU", ms(cpu_steady) / ms(gpu_steady))
     } else {
-        ("CPU", "GPU", ms(gpu_regimen) / ms(cpu_regimen))
+        ("CPU", "GPU", ms(gpu_steady) / ms(cpu_steady))
     };
-    println!("OK: resultados correctos. En régimen gana {rapido} por {veces:.2}x sobre {lento}.");
+    println!("OK: results correct. In steady state {fast} wins by {times:.2}x over {slow}.");
     Ok(())
 }
 
@@ -474,25 +477,25 @@ fn ms(d: std::time::Duration) -> f64 {
     d.as_secs_f64() * 1e3
 }
 
-/// Corre `f` `iters` veces y devuelve (la primera, el promedio del resto).
+/// Runs `f` `iters` times and returns (the first, the average of the rest).
 ///
-/// Separarlas es el punto: la primera incluye todo lo que se paga una sola vez
-/// y promediarla adentro esconde justamente lo que se quiere ver.
+/// Separating them is the point: the first includes everything that gets
+/// paid once, and averaging it in would hide exactly what we want to see.
 fn timed(
     iters: usize,
     mut f: impl FnMut() -> Result<(), String>,
 ) -> Result<(std::time::Duration, std::time::Duration), String> {
     let t0 = std::time::Instant::now();
     f()?;
-    let primera = t0.elapsed();
+    let first = t0.elapsed();
     if iters <= 1 {
-        return Ok((primera, primera));
+        return Ok((first, first));
     }
     let t0 = std::time::Instant::now();
     for _ in 1..iters {
         f()?;
     }
-    Ok((primera, t0.elapsed() / (iters - 1) as u32))
+    Ok((first, t0.elapsed() / (iters - 1) as u32))
 }
 
 fn flag(args: &[String], name: &str) -> Option<String> {
@@ -509,7 +512,7 @@ fn flag_num<T: std::str::FromStr>(args: &[String], name: &str, default: T) -> Re
         None => Ok(default),
         Some(v) => v
             .parse()
-            .map_err(|_| format!("--{} espera un número, recibí: '{}'", name, v)),
+            .map_err(|_| format!("--{} expects a number, got: '{}'", name, v)),
     }
 }
 
@@ -517,7 +520,7 @@ fn check_unknown(args: &[String], known: &[&str]) -> Result<(), String> {
     let known: Vec<String> = known.iter().map(|k| format!("--{}", k)).collect();
     for a in args {
         if a.starts_with('-') && !known.contains(a) {
-            return Err(format!("argumento desconocido: {}", a));
+            return Err(format!("unknown argument: {}", a));
         }
     }
     Ok(())
@@ -525,27 +528,27 @@ fn check_unknown(args: &[String], known: &[&str]) -> Result<(), String> {
 
 fn print_help() {
     println!(
-        "eva v0 - LLM propio desde cero (cero deps, sin CUDA, AMD-friendly)\n\n\
-         USO:\n\
-         \x20 eva train --data <archivo> [opciones]\n\
-         \x20 eva gen --weights <archivo> [--prompt texto] [--tokens N] [--temp F] [--topk N]\n\
-         \x20 eva info --weights <archivo>\n\
-         \x20 eva techo --weights <archivo> --data <archivo> [--val F]\n\
-         \x20 eva bet --weights <archivo> --data <archivo> [--val F] [--bins N]\n\
-         \x20 eva stake --weights <archivo> --data <archivo> [--span N] [--epochs N] [--lr F]\n\
+        "eva v0 - from-scratch LLM (zero deps, no CUDA, AMD-friendly)\n\n\
+         USAGE:\n\
+         \x20 eva train --data <file> [options]\n\
+         \x20 eva gen --weights <file> [--prompt text] [--tokens N] [--temp F] [--topk N]\n\
+         \x20 eva info --weights <file>\n\
+         \x20 eva ceiling --weights <file> --data <file> [--val F]\n\
+         \x20 eva bet --weights <file> --data <file> [--val F] [--bins N]\n\
+         \x20 eva stake --weights <file> --data <file> [--span N] [--epochs N] [--lr F]\n\
          \x20 eva help\n\n\
-         OPCIONES DE TRAIN:\n\
-         \x20 --seq N       ventana de contexto (default 64)\n\
-         \x20 --dim N       dimensión oculta (default 256)\n\
-         \x20 --ffn N       dimensión FFN (default 512)\n\
-         \x20 --blocks N    cantidad de bloques (default 6)\n\
-         \x20 --kernel N    kernel de la conv causal (default 5)\n\
-         \x20 --epochs N    épocas (default 10)\n\
+         TRAIN OPTIONS:\n\
+         \x20 --seq N       context window (default 64)\n\
+         \x20 --dim N       hidden dimension (default 256)\n\
+         \x20 --ffn N       FFN dimension (default 512)\n\
+         \x20 --blocks N    number of blocks (default 6)\n\
+         \x20 --kernel N    causal conv kernel (default 5)\n\
+         \x20 --epochs N    epochs (default 10)\n\
          \x20 --lr F        learning rate (default 3e-4)\n\
          \x20 --wd F        weight decay (default 0.01)\n\
-         \x20 --seed N      semilla (default 0)\n\
-         \x20 --log N       cada cuántos pasos loguear (default 20)\n\
-         \x20 --out RUTA    dónde guardar pesos (default eva.weights)\n\
-         \x20 --resume RUTA reanudar desde pesos guardados"
+         \x20 --seed N      seed (default 0)\n\
+         \x20 --log N       log every N steps (default 20)\n\
+         \x20 --out PATH    where to save weights (default eva.weights)\n\
+         \x20 --resume PATH resume from saved weights"
     );
 }

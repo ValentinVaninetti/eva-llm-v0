@@ -193,13 +193,13 @@ fn worker(ctl: Arc<Ctl>, w: usize, nworkers: usize) {
     }
 }
 
-/// Puntero crudo que es `Send + Sync`, para repartir un buffer en bandas.
+/// A raw pointer that is `Send + Sync`, to split a buffer into bands.
 ///
-/// Existe por una restricción del pool y no por gusto: `run` pide `Send + Sync
-/// + 'static`, así que un `&mut [f32]` de quien llama no entra. Es sano
-/// SÓLO porque `run` no vuelve hasta que terminó cada pieza -- nada de lo que
-/// se arma acá sobrevive al préstamo que lo originó. Si eso cambia, esto se
-/// vuelve un use-after-free.
+/// Exists because of a pool constraint, not out of preference: `run`
+/// requires `Send + Sync + 'static`, so a caller's `&mut [f32]` doesn't
+/// qualify. It's sound ONLY because `run` doesn't return until every piece
+/// has finished -- nothing built here outlives the borrow that produced it.
+/// If that ever changes, this becomes a use-after-free.
 #[derive(Clone, Copy)]
 pub struct Ptr<T>(pub T);
 
@@ -255,7 +255,7 @@ mod tests {
                 seen[t].fetch_add(1, Ordering::Relaxed);
             });
             for (t, h) in hits.iter().enumerate() {
-                assert_eq!(1, h.load(Ordering::Relaxed), "pieza {t} no corrió exactamente una vez");
+                assert_eq!(1, h.load(Ordering::Relaxed), "piece {t} did not run exactly once");
             }
         }
     }
@@ -274,7 +274,7 @@ mod tests {
             });
             let after = live.load(Ordering::Relaxed);
             std::thread::yield_now();
-            assert_eq!(after, live.load(Ordering::Relaxed), "quedó trabajo corriendo tras run()");
+            assert_eq!(after, live.load(Ordering::Relaxed), "work was still running after run()");
         }
     }
 

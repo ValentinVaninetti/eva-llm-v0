@@ -1,24 +1,26 @@
-//! 8. QUE APUESTE — el primer número que lo mata.
+//! 8. THAT IT BETS -- the first number that kills it.
 //!
-//! > ¿La confianza que el modelo **declara** rastrea lo que realmente acierta,
-//! > sobre texto que **no vio**?
+//! > Does the confidence the model **declares** track what it actually gets
+//! > right, on text it **did not see**?
 //!
-//! Se corre el modelo sobre la porción de validación (el mismo corte contiguo
-//! que usó `train`) y, para cada predicción de token, se registra:
+//! The model is run over the validation slice (the same contiguous cut
+//! `train` used) and, for each token prediction, we record:
 //!
-//! * `conf`    = p(token que elegiría) — qué tan seguro *dijo* estar
-//! * `correct` = si ese token era el real
+//! * `conf`    = p(token it would pick) -- how sure it *said* it was
+//! * `correct` = whether that token was the real one
 //!
-//! Se agrupan por deciles de confianza declarada y se mira si el acierto sube
-//! con ella. **Si la correlación no aparece, el principio organizador muere
-//! acá** y nos ahorramos los otros seis.
+//! These are grouped by declared-confidence deciles and we check whether
+//! accuracy rises with it. **If the correlation doesn't show up, the
+//! organizing principle dies right here** and we save ourselves the other
+//! six.
 //!
-//! El modo de falla a vigilar —que aprenda a apostar siempre bajo— se ve en el
-//! margen: si el margen (p1 − p2) no separa a los que aciertan de los que no,
-//! la confianza es cobardía uniforme y tampoco sirve para apostar.
+//! The failure mode to watch for -- learning to always bet low -- shows up
+//! in the margin: if the margin (p1 - p2) doesn't separate the ones it gets
+//! right from the ones it doesn't, the confidence is uniform cowardice and
+//! isn't usable for betting either.
 //!
-//! Nada se ajusta contra este número: es una medición. La validación se toca
-//! una sola vez.
+//! Nothing is tuned against this number: it's a measurement. Validation is
+//! touched exactly once.
 
 use crate::data::TextDataset;
 use crate::model::EvaModel;
@@ -30,10 +32,10 @@ pub struct Bin {
     pub hits: usize,
 }
 
-/// Agregado de la calibración sobre una porción de texto.
+/// Calibration aggregate over a slice of text.
 ///
-/// Los bins se arman sobre la confianza **declarada** (p del token que el
-/// modelo elegiría). Un bin vacío no cuenta en nada de lo de abajo.
+/// Bins are built on the **declared** confidence (p of the token the model
+/// would pick). An empty bin doesn't count toward anything below.
 pub struct Calibration {
     n_bins: usize,
     bins: Vec<Bin>,
@@ -108,7 +110,7 @@ impl Calibration {
         self.hits as f32 / self.n.max(1) as f32
     }
 
-    /// Expected Calibration Error ponderado por bin: |acierto − conf media|.
+    /// Expected Calibration Error weighted per bin: |accuracy - mean conf|.
     pub fn ece(&self) -> f32 {
         let mut ece = 0.0f64;
         for b in &self.bins {
@@ -122,10 +124,10 @@ impl Calibration {
         (ece / self.n.max(1) as f64) as f32
     }
 
-    /// Correlación entre confianza media y acierto a través de los bins.
+    /// Correlation between mean confidence and accuracy across bins.
     ///
-    /// Es el número que decide: si la confianza rastrea el acierto, tiene que
-    /// ser claramente positivo.
+    /// This is the number that decides: if confidence tracks accuracy, it
+    /// has to be clearly positive.
     pub fn bin_corr(&self) -> f32 {
         let mut xs = Vec::new();
         let mut ys = Vec::new();
@@ -139,7 +141,7 @@ impl Calibration {
         pearson(&xs, &ys)
     }
 
-    /// Acierto del bin más seguro contra el del menos seguro.
+    /// Accuracy of the most confident bin against the least confident one.
     pub fn top_vs_bottom(&self) -> Option<(f32, f32)> {
         let mut top: Option<(f64, f64)> = None;
         let mut bottom: Option<(f64, f64)> = None;
@@ -164,10 +166,11 @@ impl Calibration {
         }
     }
 
-    /// Correlación puntual-biserial entre el margen (p1 − p2) y el acierto.
+    /// Point-biserial correlation between margin (p1 - p2) and accuracy.
     ///
-    /// Si el margen no separa a los que aciertan de los que no, la confianza es
-    /// cobardía uniforme: el modo de falla que la apuesta tiene que vigilar.
+    /// If the margin doesn't separate the ones it gets right from the ones
+    /// it doesn't, the confidence is uniform cowardice: the failure mode the
+    /// bet has to watch for.
     pub fn margin_r(&self) -> f32 {
         let n = self.n.max(1) as f64;
         let p = self.hits as f64 / n;
@@ -180,9 +183,10 @@ impl Calibration {
         ((m1 - m0) / s * (p * (1.0 - p)).sqrt()) as f32
     }
 
-    /// Probabilidad que le dio a la verdad: cuando acierta vs cuando no.
+    /// Probability it gave to the truth: when correct vs when not.
     ///
-    /// Si cuando acierta le da p baja, no está "seguro" ni en los aciertos.
+    /// If even when correct it assigns low p, it isn't "sure" even on the
+    /// hits.
     pub fn pt_calibration(&self) -> (f32, f32) {
         let yes = self.pt_hits / self.hits.max(1) as f64;
         let no = (self.pt_sum - self.pt_hits) / (self.n - self.hits).max(1) as f64;
@@ -207,13 +211,13 @@ pub fn pearson(xs: &[f64], ys: &[f64]) -> f32 {
     }
 }
 
-/// Clasifica una fila de logits contra el byte real.
+/// Classifies one row of logits against the real byte.
 ///
-/// Devuelve `(conf, margen, correcto, p_target)`:
-/// * `conf` = p del token que el modelo elegiría (su apuesta)
-/// * `margen` = p1 − p2, qué tan clara está la elección
-/// * `correcto` = si el token elegido era el real
-/// * `p_target` = p que le dio a la verdad
+/// Returns `(conf, margin, correct, p_target)`:
+/// * `conf` = p of the token the model would pick (its bet)
+/// * `margin` = p1 - p2, how clear-cut the choice is
+/// * `correct` = whether the chosen token was the real one
+/// * `p_target` = p it gave to the truth
 pub fn classify_row(row: &[f32], target: usize) -> (f32, f32, bool, f32) {
     let mx = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let mut sum = 0.0f32;
@@ -238,17 +242,17 @@ pub fn classify_row(row: &[f32], target: usize) -> (f32, f32, bool, f32) {
     (top1 / sum, (top1 - top2) / sum, argmax == target, p_target / sum)
 }
 
-/// Una observación por posición de texto.
+/// One observation per text position.
 pub struct TokenObs {
     pub conf: f32,
     pub margin: f32,
     pub correct: bool,
     pub p_target: f32,
-    /// Largo (norma L2) del estado oculto pre-norma en esa posición.
+    /// Length (L2 norm) of the pre-norm hidden state at that position.
     pub hidden_norm: f32,
 }
 
-/// Mide la calibración del modelo sobre las ventanas `ds[from..to]`.
+/// Measures the model's calibration over windows `ds[from..to]`.
 pub fn measure(model: &EvaModel, ds: &TextDataset, from: usize, to: usize, n_bins: usize) -> Calibration {
     let mut cal = Calibration::new(n_bins);
     for o in scan(model, ds, from, to) {
@@ -257,11 +261,11 @@ pub fn measure(model: &EvaModel, ds: &TextDataset, from: usize, to: usize, n_bin
     cal
 }
 
-/// Una pasada sobre `ds[from..to]`, una observación por posición.
+/// One pass over `ds[from..to]`, one observation per position.
 ///
-/// Es la pasada única: la calibración por token y el análisis por tramo se
-/// agregan sobre lo que esto devuelve, para que no sean dos implementaciones
-/// del mismo softmax.
+/// This is the single pass: per-token calibration and per-span analysis are
+/// both aggregated from what this returns, so they aren't two
+/// implementations of the same softmax.
 pub fn scan(model: &EvaModel, ds: &TextDataset, from: usize, to: usize) -> Vec<TokenObs> {
     let mut out = Vec::new();
     let vocab = model.cfg.vocab;
@@ -280,42 +284,42 @@ pub fn scan(model: &EvaModel, ds: &TextDataset, from: usize, to: usize) -> Vec<T
     out
 }
 
-/// Resultado del análisis por tramo para un largo de tramo.
+/// Result of the per-span analysis for one span length.
 pub struct SpanAnalysis {
     pub span_len: usize,
     pub n: usize,
-    pub bien_global: f32,
-    /// Correlación de cada predictor con `bien`, sobre los tramos.
+    pub good_global: f32,
+    /// Correlation of each predictor with `good`, over the spans.
     pub r_media: f32,
     pub r_min: f32,
-    /// geomean de p[verdad]: la "probabilidad del tramo" real, pero usa la
-    /// respuesta — es el TECHO (oráculo), no la vara.
+    /// geomean of p[truth]: the real "span probability", but it uses the
+    /// answer -- it's the CEILING (oracle), not the bar.
     pub r_geomean: f32,
-    /// geomean de p[argmax]: la confianza del modelo en lo que él mismo diría,
-    /// disponible al generar — esta es la VARA usable.
+    /// geomean of p[argmax]: the model's confidence in what it would say
+    /// itself, available at generation time -- this is the usable BAR.
     pub r_geomean_argmax: f32,
-    pub r_magnitud: f32,
+    pub r_magnitude: f32,
 }
 
-/// Correlación entre los tramos.
+/// Correlation across spans.
 fn span_r(xs: &[f64], ys: &[f64]) -> f32 {
     pearson(xs, ys)
 }
 
-/// Parten las observaciones en tramos de `span_len` dentro de cada ventana de
-/// `seq` y mide si el acierto del tramo (`bien`) se predice con:
+/// Splits the observations into `span_len`-long spans within each `seq`
+/// window and checks whether span accuracy (`good`) is predicted by:
 ///
-/// * `media` — promedio de p[argmax] (la agregación más simple, usable)
-/// * `min` — el eslabón más débil del tramo
-/// * `geomean` — media geométrica de p[verdad]: la "probabilidad del tramo"
-///   real que le da el modelo a lo que escribió — TECHO, usa la respuesta
-/// * `geomean_argmax` — media geométrica de p[argmax]: la confianza en lo que
-///   el modelo diría, usable al generar — VARA honesta
-/// * `magnitud` — largo del vector oculto AL ARRANCAR el tramo (la señal del
-///   4, disponible antes de que el tramo exista)
+/// * `mean` -- average of p[argmax] (the simplest aggregation, usable)
+/// * `min` -- the weakest link of the span
+/// * `geomean` -- geometric mean of p[truth]: the real "span probability"
+///   the model gives to what it wrote -- CEILING, uses the answer
+/// * `geomean_argmax` -- geometric mean of p[argmax]: confidence in what the
+///   model would say, usable at generation time -- honest BAR
+/// * `magnitude` -- length of the hidden vector AT THE START of the span
+///   (signal #4, available before the span even exists)
 ///
-/// Si ninguno rastrea `bien` sobre texto que no vio, una cabeza de stake
-/// entrenada tampoco lo va a hacer: la apuesta se cierra acá.
+/// If none of them track `good` on text the model hasn't seen, a trained
+/// stake head won't either: the bet closes right here.
 pub fn span_analysis(obs: &[TokenObs], seq: usize, span_len: usize) -> SpanAnalysis {
     let mut xs_media = Vec::new();
     let mut xs_min = Vec::new();
@@ -326,13 +330,13 @@ pub fn span_analysis(obs: &[TokenObs], seq: usize, span_len: usize) -> SpanAnaly
     let mut n = 0usize;
     let mut hits = 0usize;
 
-    // Los tramos no cruzan ventanas: cada ventana tiene sus posiciones y el
-    // contexto no se mezcla entre una y la siguiente.
+    // Spans never cross windows: each window has its own positions and
+    // context doesn't mix between one and the next.
     let mut i = 0;
     while i < obs.len() {
-        let hasta = (i / seq + 1) * seq;
+        let end = (i / seq + 1) * seq;
         let mut t = i;
-        while t + span_len <= hasta {
+        while t + span_len <= end {
             let mut media = 0.0f64;
             let mut min = f64::INFINITY;
             let mut loggeo = 0.0f64;
@@ -349,29 +353,29 @@ pub fn span_analysis(obs: &[TokenObs], seq: usize, span_len: usize) -> SpanAnaly
             let geo = (loggeo / span_len as f64).exp();
             let geo_argmax = (loggeo_argmax / span_len as f64).exp();
             let mag = obs[t].hidden_norm as f64;
-            let bien = ok as f64 / span_len as f64;
+            let good = ok as f64 / span_len as f64;
             xs_media.push(m);
             xs_min.push(min);
             xs_geomean.push(geo);
             xs_geomean_argmax.push(geo_argmax);
             xs_mag.push(mag);
-            ys.push(bien);
+            ys.push(good);
             n += 1;
             hits += ok;
             t += span_len;
         }
-        i = hasta;
+        i = end;
     }
 
     SpanAnalysis {
         span_len,
         n,
-        bien_global: hits as f32 / (n * span_len).max(1) as f32,
+        good_global: hits as f32 / (n * span_len).max(1) as f32,
         r_media: span_r(&xs_media, &ys),
         r_min: span_r(&xs_min, &ys),
         r_geomean: span_r(&xs_geomean, &ys),
         r_geomean_argmax: span_r(&xs_geomean_argmax, &ys),
-        r_magnitud: span_r(&xs_mag, &ys),
+        r_magnitude: span_r(&xs_mag, &ys),
     }
 }
 
@@ -384,19 +388,19 @@ mod tests {
     }
 
     #[test]
-    fn classify_row_conocido() {
-        // logits [0, 2, 1] → e = [1, e², e]; top1 es el índice 1.
+    fn classify_row_known_case() {
+        // logits [0, 2, 1] -> e = [1, e^2, e]; top1 is index 1.
         let (conf, margin, correct, pt) = classify_row(&[0.0, 2.0, 1.0], 0);
         let s = 1.0 + (2.0f32).exp() + 1.0f32.exp();
         assert!((conf - (2.0f32).exp() / s).abs() < 1e-5, "conf {conf}");
         assert!((margin - ((2.0f32).exp() - 1.0f32.exp()) / s).abs() < 1e-5, "margin {margin}");
-        assert!(!correct, "el argmax es el índice 1, no el 0");
+        assert!(!correct, "the argmax is index 1, not 0");
         assert!((pt - 1.0 / s).abs() < 1e-5, "p_target {pt}");
     }
 
     #[test]
-    fn calibrado_perfecto_da_ece_cero() {
-        // En cada bin, acierto == conf media. ECE tiene que dar 0.
+    fn perfect_calibration_gives_zero_ece() {
+        // In each bin, accuracy == mean conf. ECE has to come out to 0.
         let mut c = Calibration::new(2);
         for _ in 0..3 {
             c.add(0.25, 0.0, false, 0.2);
@@ -410,9 +414,9 @@ mod tests {
     }
 
     #[test]
-    fn confianza_que_rastrea_da_correlacion_positiva() {
+    fn confidence_that_tracks_gives_positive_correlation() {
         let mut c = Calibration::new(4);
-        // Cuatro bins colineales con acierto = conf + 0.05 (n=10 por bin):
+        // Four bins collinear with accuracy = conf + 0.05 (n=10 per bin):
         // bin0: 1/10, bin1: 4/10, bin2: 7/10, bin3: 9/10.
         let plan = [(0.05, 1), (0.35, 4), (0.65, 7), (0.95, 9)];
         for (conf, hits) in plan {
@@ -425,13 +429,13 @@ mod tests {
         }
         assert!(c.bin_corr() > 0.99, "r = {}", c.bin_corr());
         let (top, bottom) = c.top_vs_bottom().unwrap();
-        assert!(top > bottom, "top {top} debería superar a bottom {bottom}");
+        assert!(top > bottom, "top {top} should beat bottom {bottom}");
     }
 
     #[test]
-    fn confianza_que_miente_da_correlacion_negativa() {
+    fn confidence_that_lies_gives_negative_correlation() {
         let mut c = Calibration::new(4);
-        // Colineal al revés: acierto = 1 − conf (n=20 por bin).
+        // Collinear the other way around: accuracy = 1 - conf (n=20 per bin).
         let plan = [(0.05, 19), (0.35, 13), (0.65, 7), (0.95, 1)];
         for (conf, hits) in plan {
             for _ in 0..20 - hits {
@@ -445,8 +449,9 @@ mod tests {
     }
 
     #[test]
-    fn el_margen_separa_a_quienes_aciertan() {
-        // Los que aciertan tienen margen alto; los que no, margen bajo.
+    fn the_margin_separates_who_gets_it_right() {
+        // The ones that get it right have high margin; the ones that don't,
+        // low margin.
         let mut c = Calibration::new(2);
         for _ in 0..20 {
             c.add(0.8, 0.6, true, 0.8);
@@ -454,11 +459,11 @@ mod tests {
         }
         assert!(c.margin_r() > 0.9, "r = {}", c.margin_r());
         let (yes, no) = c.pt_calibration();
-        assert!(yes > no, "p_verdad cuando acierta {yes} debería superar a cuando no {no}");
+        assert!(yes > no, "p_truth when correct {yes} should beat when not {no}");
     }
 
     #[test]
-    fn confianza_uno_va_al_ultimo_bin() {
+    fn confidence_one_goes_to_the_last_bin() {
         let mut c = Calibration::new(3);
         c.add(1.0, 0.0, true, 1.0);
         assert_eq!(c.bins[2].n, 1);
@@ -466,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn bins_vacios_no_cuentan() {
+    fn empty_bins_do_not_count() {
         let mut c = Calibration::new(10);
         for _ in 0..10 {
             c.add(0.95, 0.0, true, 0.9);
@@ -480,44 +485,44 @@ mod tests {
     }
 
     #[test]
-    fn top_vs_bottom_usa_la_media_no_el_conteo() {
-        // Muchos con conf baja, uno solo con conf alta: la comparación tiene
-        // que ir por la MEDIA de confianza, no por la suma del bin.
+    fn top_vs_bottom_uses_the_mean_not_the_count() {
+        // Many with low conf, a single one with high conf: the comparison
+        // has to go by the MEAN confidence, not the bin's sum.
         let mut c = Calibration::new(10);
         for _ in 0..100 {
-            c.add(0.1, 0.0, false, 0.1); // acc 0, suma 10
+            c.add(0.1, 0.0, false, 0.1); // acc 0, sum 10
         }
-        c.add(0.9, 0.0, true, 0.9); // acc 1, suma 0.9
+        c.add(0.9, 0.0, true, 0.9); // acc 1, sum 0.9
         let (top, bottom) = c.top_vs_bottom().unwrap();
-        assert_eq!(top, 1.0, "el bin más seguro es el de conf 0.9");
+        assert_eq!(top, 1.0, "the most confident bin is the one at conf 0.9");
         assert_eq!(bottom, 0.0);
     }
 
     #[test]
-    fn tramos_no_cruzan_ventanas_y_los_predictores_rastrean() {
-        // seq 6 → dos ventanas de 6 posiciones; span_len 3 → 4 tramos, y
-        // ninguno puede cruzar de una ventana a la otra.
+    fn spans_do_not_cross_windows_and_predictors_track() {
+        // seq 6 -> two windows of 6 positions; span_len 3 -> 4 spans, and
+        // none of them can cross from one window to the other.
         let plan = [(0.0, 0.01), (1.0 / 3.0, 1.0 / 3.0), (2.0 / 3.0, 2.0 / 3.0), (1.0, 0.99)];
         let mut obs = Vec::new();
-        for &(bien, pt) in &plan {
+        for &(good, pt) in &plan {
             for k in 0..3 {
-                let correct = (k as f32) < bien * 3.0;
-                obs.push(mk_obs(pt, pt, correct, bien + 0.5));
+                let correct = (k as f32) < good * 3.0;
+                obs.push(mk_obs(pt, pt, correct, good + 0.5));
             }
         }
         let a = span_analysis(&obs, 6, 3);
         assert_eq!(a.n, 4);
-        assert!((a.bien_global - 0.5).abs() < 0.01, "bien global {}", a.bien_global);
+        assert!((a.good_global - 0.5).abs() < 0.01, "good global {}", a.good_global);
         assert!(a.r_geomean > 0.99, "r_geomean {}", a.r_geomean);
         assert!(a.r_geomean_argmax > 0.99, "r_geomean_argmax {}", a.r_geomean_argmax);
-        assert!(a.r_magnitud > 0.99, "r_magnitud {}", a.r_magnitud);
+        assert!(a.r_magnitude > 0.99, "r_magnitude {}", a.r_magnitude);
         assert!(a.r_media > 0.99, "r_media {}", a.r_media);
     }
 
     #[test]
-    fn geomean_con_p_cero_sigue_siendo_finito() {
-        // p[verdad] = 0 en un tramo: la media geométrica tiene que quedar
-        // finita (piso), no explotar a infinito.
+    fn geomean_with_p_zero_stays_finite() {
+        // p[truth] = 0 in one span: the geometric mean has to stay finite
+        // (a floor), not blow up to infinity.
         let mut obs = Vec::new();
         for _ in 0..2 {
             obs.push(mk_obs(0.5, 0.0, true, 1.0));

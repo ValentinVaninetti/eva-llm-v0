@@ -1,4 +1,5 @@
 pub mod bet;
+pub mod ceiling;
 pub mod cli;
 pub mod constrain;
 pub mod data;
@@ -18,7 +19,6 @@ pub mod save;
 pub mod settle;
 pub mod stake;
 pub mod stream;
-pub mod techo;
 pub mod tensor;
 pub mod tokenizer;
 pub mod train;

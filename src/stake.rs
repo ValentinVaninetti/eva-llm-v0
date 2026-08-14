@@ -1,17 +1,19 @@
-//! 8. QUE APUESTE — la cabeza de stake por tramo.
+//! 8. THAT IT BETS -- the per-span stake head.
 //!
-//! El experimento decisivo que quedó definido con Claudio: ¿una cabeza que lee
-//! el estado oculto AL ARRANCAR el tramo predice si el tramo va a salir bien,
-//! mejor que la vara libre (media de p[argmax] ≈ 0.67) y antes de gastar?
+//! The decisive experiment that got defined with Claudio: does a head that
+//! reads the hidden state AT THE START of a span predict whether the span is
+//! going to go well, better than the free bar (mean p[argmax] approx 0.67)
+//! and before spending anything?
 //!
-//! La cabeza es una sonda: una proyección lineal del estado oculto a un stake
-//! en (0,1), entrenada con `stake_loss` (la op nueva, forward+backward+
-//! gradcheck, en el estilo del contrato). El estado oculto entra DETACHED: la
-//! sonda no le manda gradiente al modelo. Que el gradiente cruce es la decisión
-//! 4, más cara, y se mide recién si acá hay señal.
+//! The head is a probe: a linear projection of the hidden state onto a
+//! stake in (0,1), trained with `stake_loss` (the new op, forward+backward+
+//! gradcheck, in the contract's style). The hidden state comes in DETACHED:
+//! the probe doesn't send gradient back to the model. Letting the gradient
+//! cross is decision 4, which is more expensive, and only gets measured if
+//! there's signal here.
 //!
-//! Es andamio como `local::Heads`: no se guarda en el checkpoint, el modelo
-//! queda intacto.
+//! It's scaffolding like `local::Heads`: it isn't saved in the checkpoint,
+//! the model stays untouched.
 
 use crate::model::EvaModel;
 use crate::nn::param;
@@ -19,7 +21,7 @@ use crate::rng::Rng;
 use crate::tensor::ops as ops;
 use crate::tensor::Tensor;
 
-/// La cabeza de stake: `s = sigmoid(w·h + b)`. D números + 1 bias.
+/// The stake head: `s = sigmoid(w*h + b)`. D numbers + 1 bias.
 pub struct StakeHead {
     pub w: Tensor,
     pub b: Tensor,
@@ -42,7 +44,7 @@ impl StakeHead {
         self.w.data.len() + self.b.data.len()
     }
 
-    /// El stake de cada tramo de una ventana, sobre el estado oculto real.
+    /// The stake for each span of a window, over the real hidden state.
     pub fn stakes(&self, hidden: &Tensor, span_len: usize) -> Vec<f32> {
         let d = hidden.shape[1];
         let s = hidden.shape[0];
@@ -61,15 +63,15 @@ impl StakeHead {
     }
 }
 
-/// Cuánto salió bien cada tramo de una ventana: la fracción de posiciones
-/// donde el argmax del modelo acertó. Es el `bien` del md, y es un dato, no
-/// algo diferenciable: entra a la pérdida por `saved_f`.
-pub fn bien_por_tramo(logits: &Tensor, targets: &[usize], span_len: usize) -> Vec<f32> {
+/// How well each span of a window went: the fraction of positions where the
+/// model's argmax was correct. It's the `good` from the design doc, and it's
+/// data, not something differentiable: it enters the loss through `saved_f`.
+pub fn good_per_span(logits: &Tensor, targets: &[usize], span_len: usize) -> Vec<f32> {
     let (s, v) = (logits.shape[0], logits.shape[1]);
     let mut out = Vec::new();
     let mut k = 0;
     while (k + 1) * span_len <= s {
-        let mut aciertos = 0usize;
+        let mut correct = 0usize;
         for t in k * span_len..(k + 1) * span_len {
             let row = &logits.data[t * v..(t + 1) * v];
             let argmax = row
@@ -78,27 +80,27 @@ pub fn bien_por_tramo(logits: &Tensor, targets: &[usize], span_len: usize) -> Ve
                 .fold((0usize, f32::NEG_INFINITY), |(bi, bv), (i, &x)| if x > bv { (i, x) } else { (bi, bv) })
                 .0;
             if argmax == targets[t] {
-                aciertos += 1;
+                correct += 1;
             }
         }
-        out.push(aciertos as f32 / span_len as f32);
+        out.push(correct as f32 / span_len as f32);
         k += 1;
     }
     out
 }
 
-/// La representación que alimenta la sonda: el estado oculto, detached, en
-/// su forma cruda (pre-norma) o la que el modelo usa para predecir
-/// (post-norma, RMSNorm + ganancia). La elección se mide porque el modelo
-/// predice sobre la segunda; si la señal está, tiene que estar ahí.
-fn representacion(model: &EvaModel, hidden: &Tensor, post_norm: bool) -> Tensor {
+/// The representation that feeds the probe: the hidden state, detached, in
+/// its raw form (pre-norm) or the one the model actually uses to predict
+/// (post-norm, RMSNorm + gain). The choice is measured because the model
+/// predicts on the second one; if the signal is there, it has to be there.
+fn representation(model: &EvaModel, hidden: &Tensor, post_norm: bool) -> Tensor {
     if !post_norm {
         return hidden.detach();
     }
-    // Se aplica a mano sobre los datos detached: correr `norm_out.forward`
-    // dejaría un nodo que apunta al w del modelo, y al backpropagear el
-    // stake_loss entrenaría la norma del modelo -- justo lo que la sonda no
-    // puede tocar.
+    // Applied by hand on the detached data: running `norm_out.forward`
+    // would leave a node pointing at the model's w, and backpropagating
+    // stake_loss would end up training the model's norm -- exactly what the
+    // probe isn't allowed to touch.
     let (s, d) = (hidden.shape[0], hidden.shape[1]);
     let eps = model.cfg.eps;
     let wn = &model.norm_out.w.data;
@@ -117,12 +119,12 @@ fn representacion(model: &EvaModel, hidden: &Tensor, post_norm: bool) -> Tensor 
     Tensor::new(out, vec![s, d])
 }
 
-/// Entrena la sonda y la mide. Devuelve (r en entrenamiento, r en validación,
-/// n de tramos de validación).
+/// Trains the probe and measures it. Returns (r on training, r on
+/// validation, number of validation spans).
 ///
-/// El modelo queda congelado: nunca toca sus parámetros. Sólo `w` y `b` se
-/// actualizan, a través del `stake_loss` del grafo.
-pub fn entrenar_y_medir(
+/// The model stays frozen: it never touches its parameters. Only `w` and
+/// `b` get updated, through the graph's `stake_loss`.
+pub fn train_and_measure(
     model: &EvaModel,
     ds: &crate::data::TextDataset,
     n_train: usize,
@@ -143,50 +145,52 @@ pub fn entrenar_y_medir(
         for (i, &wi) in order.iter().enumerate() {
             let (input, target) = ds.window(wi);
             let (logits, hidden) = model.forward_hidden(&input);
-            let bien = bien_por_tramo(&logits, &target, span_len);
-            // El estado oculto entra desconectado: la sonda no manda gradiente
-            // al modelo. Es el punto entero de la medición.
-            let h = representacion(model, &hidden, post_norm);
-            let loss = ops::stake_loss(&h, &head.w, &head.b, &bien, span_len);
+            let good = good_per_span(&logits, &target, span_len);
+            // The hidden state comes in disconnected: the probe doesn't
+            // send gradient to the model. That's the whole point of the
+            // measurement.
+            let h = representation(model, &hidden, post_norm);
+            let loss = ops::stake_loss(&h, &head.w, &head.b, &good, span_len);
             let grads = crate::tensor::autograd::backward(&loss);
             let mut params = head.params_mut();
             opt.step(&mut params, &grads);
             sum += loss.data[0];
             if i % 500 == 0 {
-                println!("  stake epoch {} | paso {} | loss {:.4}", epoch + 1, i, loss.data[0]);
+                println!("  stake epoch {} | step {} | loss {:.4}", epoch + 1, i, loss.data[0]);
             }
         }
-        println!("  stake epoch {} | loss media {:.4}", epoch + 1, sum / order.len().max(1) as f32);
+        println!("  stake epoch {} | mean loss {:.4}", epoch + 1, sum / order.len().max(1) as f32);
     }
 
-    // Medición sobre las ventanas de entrenamiento (¿memorizó ruido?) y las de
-    // validación (las que el modelo nunca vio, el número que vale).
-    let (r_train, _) = medir(&head, model, ds, 0, n_train, span_len, post_norm);
-    let (r_val, n_val_spans) = medir(&head, model, ds, n_train, n_train + n_val, span_len, post_norm);
-    println!("  cabeza: {} params (w+b) | r(stake vs bien) train {:.3} | val {:.3} sobre {n_val_spans} tramos",
+    // Measured over the training windows (did it memorize noise?) and the
+    // validation ones (the ones the model never saw, the number that
+    // matters).
+    let (r_train, _) = measure(&head, model, ds, 0, n_train, span_len, post_norm);
+    let (r_val, n_val_spans) = measure(&head, model, ds, n_train, n_train + n_val, span_len, post_norm);
+    println!("  head: {} params (w+b) | r(stake vs good) train {:.3} | val {:.3} over {n_val_spans} spans",
         head.count(), r_train, r_val);
     (r_train, r_val, n_val_spans)
 }
 
-/// r(stake, bien) de la cabeza sobre las ventanas [desde, hasta).
-pub fn medir(
+/// r(stake, good) of the head over windows [from, to).
+pub fn measure(
     head: &StakeHead,
     model: &EvaModel,
     ds: &crate::data::TextDataset,
-    desde: usize,
-    hasta: usize,
+    from: usize,
+    to: usize,
     span_len: usize,
     post_norm: bool,
 ) -> (f32, usize) {
     let mut xs = Vec::new();
     let mut ys = Vec::new();
-    for wi in desde..hasta {
+    for wi in from..to {
         let (input, target) = ds.window(wi);
         let (logits, hidden) = model.forward_hidden(&input);
-        let bien = bien_por_tramo(&logits, &target, span_len);
-        let h = representacion(model, &hidden, post_norm);
+        let good = good_per_span(&logits, &target, span_len);
+        let h = representation(model, &hidden, post_norm);
         let stakes = head.stakes(&h, span_len);
-        for (x, y) in stakes.iter().zip(&bien) {
+        for (x, y) in stakes.iter().zip(&good) {
             xs.push(*x as f64);
             ys.push(*y as f64);
         }
@@ -199,42 +203,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bien_cuenta_el_argmax_no_la_probabilidad() {
-        // Cada fila tiene un único máximo; bien mira dónde cae.
+    fn good_counts_the_argmax_not_the_probability() {
+        // Each row has a single maximum; good looks at where it falls.
         let logits = param(
             vec![0.0, 1.0, 0.0,  0.0, 0.0, 1.0,  1.0, 0.0, 0.0,  0.0, 1.0, 0.0],
             vec![4, 3],
         );
         let targets = vec![1usize, 2, 0, 1];
-        let bien = bien_por_tramo(&logits, &targets, 2);
-        assert_eq!(bien, vec![1.0, 1.0], "ambas filas de cada tramo aciertan");
+        let good = good_per_span(&logits, &targets, 2);
+        assert_eq!(good, vec![1.0, 1.0], "both rows of each span are correct");
     }
 
     #[test]
-    fn bien_se_qeda_con_la_fraccion() {
+    fn good_keeps_the_fraction() {
         let logits = param(
             vec![0.0, 1.0, 0.0,  0.0, 0.0, 1.0,  1.0, 0.0, 0.0,  0.0, 0.0, 1.0],
             vec![4, 3],
         );
         let targets = vec![1usize, 0, 0, 2];
-        let bien = bien_por_tramo(&logits, &targets, 2);
-        assert_eq!(bien, vec![0.5, 1.0], "el tramo 0 acierta 1 de 2");
+        let good = good_per_span(&logits, &targets, 2);
+        assert_eq!(good, vec![0.5, 1.0], "span 0 gets 1 out of 2 correct");
     }
 
     #[test]
-    fn los_tramos_no_usan_sobras() {
-        // s=5, span=2 → 2 tramos completos; la posición 4 se descarta.
+    fn spans_do_not_use_leftovers() {
+        // s=5, span=2 -> 2 complete spans; position 4 is discarded.
         let mut rng = Rng::new(3);
         let head = StakeHead::new(3, &mut rng);
         let hidden = param((0..15).map(|i| i as f32 * 0.1).collect(), vec![5, 3]);
         assert_eq!(head.stakes(&hidden, 2).len(), 2);
     }
 
-    /// Sanity del pipeline completo: si la señal está en el estado, la sonda
-    /// la encuentra. Sin este test, un r≈0 en el modelo real podría ser un
-    /// pipeline roto y no un resultado.
+    /// Full-pipeline sanity check: if the signal is in the state, the probe
+    /// finds it. Without this test, an r approx 0 on the real model could
+    /// mean a broken pipeline instead of a real result.
     #[test]
-    fn la_sonda_aprende_una_senal_que_si_esta() {
+    fn the_probe_learns_a_signal_that_is_actually_there() {
         let (d, s, span) = (8usize, 8usize, 4usize);
         let mut rng = Rng::new(7);
         let mut head = StakeHead::new(d, &mut rng);
@@ -242,21 +246,21 @@ mod tests {
         let mut xs = Vec::new();
         let mut ys = Vec::new();
         for _ in 0..400 {
-            let bien = if rng.uniform(0.0, 1.0) > 0.5 { 1.0 } else { 0.0 };
-            // El arranque de cada tramo (filas 0 y d) codifica `bien` en la
-            // coordenada 0; el resto es ruido.
+            let good = if rng.uniform(0.0, 1.0) > 0.5 { 1.0 } else { 0.0 };
+            // The start of each span (rows 0 and d) encodes `good` in
+            // coordinate 0; the rest is noise.
             let mut data = vec![0.0; s * d];
-            data[0] = bien * 4.0 - 2.0;
-            data[d] = bien * 4.0 - 2.0;
+            data[0] = good * 4.0 - 2.0;
+            data[d] = good * 4.0 - 2.0;
             let hidden = Tensor::new(data, vec![s, d]);
-            let loss = ops::stake_loss(&hidden, &head.w, &head.b, &[bien, bien], span);
+            let loss = ops::stake_loss(&hidden, &head.w, &head.b, &[good, good], span);
             let grads = crate::tensor::autograd::backward(&loss);
             let mut params = head.params_mut();
             opt.step(&mut params, &grads);
             xs.push(head.stakes(&hidden, span)[0] as f64);
-            ys.push(bien as f64);
+            ys.push(good as f64);
         }
         let r = crate::bet::pearson(&xs, &ys);
-        assert!(r > 0.9, "la sonda no aprendió una señal que está: r={r}");
+        assert!(r > 0.9, "the probe did not learn a signal that is there: r={r}");
     }
 }

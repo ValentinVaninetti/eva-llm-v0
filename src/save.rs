@@ -3,12 +3,12 @@ use std::io::{Read, Write};
 
 use crate::model::{EvaConfig, EvaModel};
 
-/// v1 y no v0 por un bug de formato, no por un campo nuevo: en v0 `eps` se
-/// leía SIN avanzar el cursor, así que `seq_len` releía esos mismos cuatro
-/// bytes y volvía 925353388 --el patrón de bits de 1e-5--. Como seq_len sólo
-/// recorta la ventana, fallaba en silencio: se generaba muy por fuera del
-/// largo con el que se entrenó y nadie se enteraba. Mantener compatibilidad
-/// con un formato que se lee mal es peor que romperla.
+/// v1 and not v0 because of a format bug, not a new field: in v0 `eps` was
+/// read WITHOUT advancing the cursor, so `seq_len` re-read those same four
+/// bytes and came back as 925353388 --the bit pattern of 1e-5--. Since
+/// seq_len only trims the window, it failed silently: generation happened
+/// way outside the length it was trained with and nobody noticed. Keeping
+/// compatibility with a format that reads wrong is worse than breaking it.
 const MAGIC: &[u8; 6] = b"EVAV1\0";
 const MAGIC_V0: &[u8; 6] = b"EVAV0\0";
 
@@ -48,13 +48,13 @@ pub fn load_model(path: &str) -> std::io::Result<EvaModel> {
     if buf.len() >= 6 && &buf[0..6] == MAGIC_V0 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "checkpoint EVAV0: su seq_len está mal guardado (ver MAGIC). Reentrenar.",
+            "EVAV0 checkpoint: its seq_len is saved wrong (see MAGIC). Retrain.",
         ));
     }
     if buf.len() < 6 || &buf[0..6] != MAGIC {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "archivo no es un modelo eva",
+            "file is not an eva model",
         ));
     }
     let mut pos = 6;
@@ -94,7 +94,7 @@ pub fn load_model(path: &str) -> std::io::Result<EvaModel> {
     let mut model = EvaModel::new(cfg);
     for (name, t) in model.named_parameters_mut() {
         if let Some(w) = weights.remove(&name) {
-            debug_assert_eq!(w.len(), t.data.len(), "shape mismatch en {}", name);
+            debug_assert_eq!(w.len(), t.data.len(), "shape mismatch in {}", name);
             t.data = std::sync::Arc::new(w);
         }
     }
@@ -115,7 +115,7 @@ fn push_str(buf: &mut Vec<u8>, s: &str) {
     buf.extend_from_slice(b);
 }
 
-/// Lee y AVANZA. La versión que no avanzaba fue el bug de v0.
+/// Reads and ADVANCES. The version that didn't advance was the v0 bug.
 fn read_f32(buf: &[u8], pos: &mut usize) -> f32 {
     let v = f32::from_le_bytes([buf[*pos], buf[*pos + 1], buf[*pos + 2], buf[*pos + 3]]);
     *pos += 4;
@@ -143,5 +143,5 @@ pub fn describe(model: &EvaModel) -> String {
         total += n;
         lines.push(format!("  {:40} {:>10} params  shape={:?}", name, n, t.shape));
     }
-    format!("modelo EVA v0\n  config: {:?}\n  total: {} params\n{}\n", model.cfg, total, lines.join("\n"))
+    format!("EVA v0 model\n  config: {:?}\n  total: {} params\n{}\n", model.cfg, total, lines.join("\n"))
 }

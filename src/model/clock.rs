@@ -3,6 +3,34 @@ use crate::rng::Rng;
 use crate::tensor::ops as ops;
 use crate::tensor::Tensor;
 
+/// Ronda 4, hipótesis de GPT: ¿el achatamiento de `alpha` es saturación
+/// del sigmoid (medido: |grad| 20-100x más chico donde alpha≈0), no
+/// preferencia de la loss? Con esto activo, ClockMem usa
+/// `ops::algebraic_sigmoid` (cola polinómica) en vez de `ops::sigmoid`
+/// (cola exponencial) para todo lo demás idéntico -- misma arquitectura,
+/// mismo rango de `alpha`, mismo `EVA_ALPHA_MAX`, sólo cambia cuánta
+/// señal de gradiente sobrevive cerca de los extremos.
+fn antisat() -> bool {
+    std::env::var("EVA_ALPHA_ANTISAT").is_ok()
+}
+
+fn alpha_squash(z: &Tensor) -> Tensor {
+    if antisat() { ops::algebraic_sigmoid(z) } else { ops::sigmoid(z) }
+}
+
+/// Inversa de `alpha_squash`, sólo para inicializar `log_clock` apuntando
+/// al mismo `alpha` objetivo sin importar qué squashing esté activo -- si
+/// no, cambiar el squashing también cambiaría el rango inicial y ya no
+/// sería una sola variable entre las dos condiciones.
+fn alpha_squash_inv(a: f32) -> f32 {
+    if antisat() {
+        // s(z)=0.5(1+z/sqrt(1+z^2))  =>  z = (2a-1) / (2*sqrt(a(1-a)))
+        (2.0 * a - 1.0) / (2.0 * (a * (1.0 - a)).sqrt())
+    } else {
+        (a / (1.0 - a)).ln()
+    }
+}
+
 pub struct ClockMem {
     pub wq: Linear,
     pub wk: Linear,
@@ -35,7 +63,7 @@ impl ClockMem {
                     .map(|i| {
                         let t = if d == 1 { 1.0 } else { i as f32 / (d - 1) as f32 };
                         let a = a_max * (a_min / a_max).powf(t);
-                        (a / (1.0 - a)).ln()
+                        alpha_squash_inv(a)
                     })
                     .collect();
                 param(logits, vec![d])
@@ -53,7 +81,7 @@ impl ClockMem {
         let k = self.wk.forward(x);
         let v = self.wv.forward(x);
         let g = ops::sigmoid(&self.wg.forward(x));
-        let alpha = ops::sigmoid(&self.log_clock);
+        let alpha = alpha_squash(&self.log_clock);
         ops::clockmem_from(&q, &k, &v, &g, &alpha, &self.beta, s0)
     }
 }
@@ -64,7 +92,7 @@ impl Module for ClockMem {
         let k = self.wk.forward(x);
         let v = self.wv.forward(x);
         let g = ops::sigmoid(&self.wg.forward(x));
-        let alpha = ops::sigmoid(&self.log_clock);
+        let alpha = alpha_squash(&self.log_clock);
         ops::clockmem(&q, &k, &v, &g, &alpha, &self.beta)
     }
 

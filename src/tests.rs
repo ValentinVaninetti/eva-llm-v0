@@ -161,6 +161,7 @@ fn gradcheck_scale_silu_sigmoid_sum() {
     gradcheck_unary("scale", &mut x, |t| ops::scale(t, 2.5));
     gradcheck_unary("silu", &mut x, |t| ops::silu(t));
     gradcheck_unary("sigmoid", &mut x, |t| ops::sigmoid(t));
+    gradcheck_unary("algebraic_sigmoid", &mut x, |t| ops::algebraic_sigmoid(t));
     gradcheck_unary("sum_all", &mut x, |t| ops::sum_all(t));
 }
 

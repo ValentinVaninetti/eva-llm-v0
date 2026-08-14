@@ -327,6 +327,16 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
             }
             push(0, gx);
         }
+        "algebraic_sigmoid" => {
+            // s(z) = 0.5*(1+z/sqrt(1+z^2)); s'(z) = 0.5/(1+z^2)^1.5.
+            let x = &n.saved_v[0];
+            let mut gx = vec![0.0; x.len()];
+            for i in 0..x.len() {
+                let denom = (1.0 + x[i] * x[i]).powf(1.5);
+                gx[i] = g[i] * 0.5 / denom;
+            }
+            push(0, gx);
+        }
         "rms_norm" => {
             let x = &n.saved_v[0];
             let eps = n.saved_f[0];

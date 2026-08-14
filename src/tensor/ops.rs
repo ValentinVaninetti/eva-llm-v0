@@ -201,6 +201,20 @@ pub fn sigmoid(x: &Tensor) -> Tensor {
     finalize(&[x], "sigmoid", out.clone(), x.shape.clone(), vec![std::sync::Arc::new(out)], vec![], vec![])
 }
 
+/// Squashing R->(0,1) con cola POLINÓMICA en vez de exponencial: la
+/// derivada decae como 1/|z|^3 (`sigmoid` decae como exp(-|z|)) -- mucha
+/// más señal sobrevive lejos del centro. Existe para la Ronda 4, hipótesis
+/// de GPT: si el achatamiento de `alpha` en ClockMem es saturación del
+/// sigmoid (medido: |grad| 20-100x más chico en la banda rápida) y no
+/// preferencia de la loss, esta op debería dejar que el gradiente siga
+/// llegando incluso con alpha cerca de 0.
+///
+/// s(z) = 0.5·(1 + z/√(1+z²))  -- mismo dominio/rango que sigmoid.
+pub fn algebraic_sigmoid(x: &Tensor) -> Tensor {
+    let out: Vec<f32> = x.data.iter().map(|&v| 0.5 * (1.0 + v / (1.0 + v * v).sqrt())).collect();
+    finalize(&[x], "algebraic_sigmoid", out, x.shape.clone(), vec![x.data.clone()], vec![], vec![])
+}
+
 pub fn rms_norm(x: &Tensor, w: &Tensor, eps: f32) -> Tensor {
     assert_eq!(x.shape.len(), 2, "rms_norm expects 2D input (S,D)");
     let (s, d) = (x.shape[0], x.shape[1]);

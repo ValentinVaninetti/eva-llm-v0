@@ -1,0 +1,89 @@
+=== EVA_ALPHA_TEMP=1.3, traza cada 500, arranca vie 14 ago 2026 02:49:03 -03 ===
+warning: fields `at` and `in_slot` are never read
+  --> src/constrain.rs:82:5
+   |
+76 | pub struct Skeleton {
+   |            -------- fields in this struct
+...
+82 |     at: usize,
+   |     ^^
+83 |     /// Cuántos bytes lleva emitidos el hueco actual.
+84 |     in_slot: usize,
+   |     ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `eva_llm_v0` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.00s
+     Running `target/release/eva_llm_v0 train --data data/prosa250.txt --dim 512 --ffn 1024 --blocks 5 --seq 64 --val 0.1 --seed 7 --epochs 1 --gate-beta 0.0 --log 500 --out 16m5b_seed7_temp13.weights`
+eva: dataset 250000 bytes, 3906 windows, 13405701 params
+eva: 3515 ventanas para entrenar, 391 para validar
+eva: TRAZA de alpha/gradiente ACTIVA (EVA_ALPHA_TRACE)
+[eva] matmul por GPU: NVIDIA GeForce GTX 1650
+  [traza step 500] bloque 0: rápido=83 medio=275 lento=154 | alpha_media=0.2440 | |grad|_medio=0.000095 (n=500)
+  [traza step 500] bloque 1: rápido=84 medio=273 lento=155 | alpha_media=0.2441 | |grad|_medio=0.000058 (n=500)
+  [traza step 500] bloque 2: rápido=83 medio=275 lento=154 | alpha_media=0.2441 | |grad|_medio=0.000049 (n=500)
+  [traza step 500] bloque 3: rápido=84 medio=274 lento=154 | alpha_media=0.2440 | |grad|_medio=0.000039 (n=500)
+  [traza step 500] bloque 4: rápido=84 medio=273 lento=155 | alpha_media=0.2439 | |grad|_medio=0.000039 (n=500)
+step 500/3515 | epoch 1 | loss 2.7826 | 5.0 steps/s
+  [traza step 1000] bloque 0: rápido=83 medio=274 lento=155 | alpha_media=0.2440 | |grad|_medio=0.000131 (n=500)
+  [traza step 1000] bloque 1: rápido=83 medio=274 lento=155 | alpha_media=0.2443 | |grad|_medio=0.000065 (n=500)
+  [traza step 1000] bloque 2: rápido=83 medio=274 lento=155 | alpha_media=0.2442 | |grad|_medio=0.000048 (n=500)
+  [traza step 1000] bloque 3: rápido=83 medio=274 lento=155 | alpha_media=0.2441 | |grad|_medio=0.000035 (n=500)
+  [traza step 1000] bloque 4: rápido=83 medio=274 lento=155 | alpha_media=0.2440 | |grad|_medio=0.000037 (n=500)
+step 1000/3515 | epoch 1 | loss 2.0660 | 4.6 steps/s
+  [traza step 1500] bloque 0: rápido=82 medio=276 lento=154 | alpha_media=0.2440 | |grad|_medio=0.000130 (n=500)
+  [traza step 1500] bloque 1: rápido=82 medio=275 lento=155 | alpha_media=0.2444 | |grad|_medio=0.000069 (n=500)
+  [traza step 1500] bloque 2: rápido=82 medio=276 lento=154 | alpha_media=0.2444 | |grad|_medio=0.000050 (n=500)
+  [traza step 1500] bloque 3: rápido=82 medio=274 lento=156 | alpha_media=0.2442 | |grad|_medio=0.000037 (n=500)
+  [traza step 1500] bloque 4: rápido=83 medio=274 lento=155 | alpha_media=0.2440 | |grad|_medio=0.000038 (n=500)
+step 1500/3515 | epoch 1 | loss 1.9488 | 4.8 steps/s
+  [traza step 2000] bloque 0: rápido=82 medio=275 lento=155 | alpha_media=0.2441 | |grad|_medio=0.000134 (n=500)
+  [traza step 2000] bloque 1: rápido=82 medio=273 lento=157 | alpha_media=0.2447 | |grad|_medio=0.000071 (n=500)
+  [traza step 2000] bloque 2: rápido=82 medio=276 lento=154 | alpha_media=0.2445 | |grad|_medio=0.000052 (n=500)
+  [traza step 2000] bloque 3: rápido=82 medio=274 lento=156 | alpha_media=0.2444 | |grad|_medio=0.000038 (n=500)
+  [traza step 2000] bloque 4: rápido=83 medio=274 lento=155 | alpha_media=0.2442 | |grad|_medio=0.000040 (n=500)
+step 2000/3515 | epoch 1 | loss 1.8259 | 5.1 steps/s
+  [traza step 2500] bloque 0: rápido=81 medio=276 lento=155 | alpha_media=0.2442 | |grad|_medio=0.000140 (n=500)
+  [traza step 2500] bloque 1: rápido=81 medio=274 lento=157 | alpha_media=0.2449 | |grad|_medio=0.000075 (n=500)
+  [traza step 2500] bloque 2: rápido=82 medio=275 lento=155 | alpha_media=0.2447 | |grad|_medio=0.000055 (n=500)
+  [traza step 2500] bloque 3: rápido=82 medio=274 lento=156 | alpha_media=0.2447 | |grad|_medio=0.000042 (n=500)
+  [traza step 2500] bloque 4: rápido=81 medio=276 lento=155 | alpha_media=0.2443 | |grad|_medio=0.000042 (n=500)
+step 2500/3515 | epoch 1 | loss 1.7471 | 4.9 steps/s
+  validación: loss 1.8773 | 2.708 bits/byte
+  [traza step 3000] bloque 0: rápido=81 medio=276 lento=155 | alpha_media=0.2443 | |grad|_medio=0.000140 (n=500)
+  [traza step 3000] bloque 1: rápido=81 medio=274 lento=157 | alpha_media=0.2451 | |grad|_medio=0.000076 (n=500)
+  [traza step 3000] bloque 2: rápido=82 medio=273 lento=157 | alpha_media=0.2449 | |grad|_medio=0.000055 (n=500)
+  [traza step 3000] bloque 3: rápido=82 medio=274 lento=156 | alpha_media=0.2449 | |grad|_medio=0.000044 (n=500)
+  [traza step 3000] bloque 4: rápido=81 medio=276 lento=155 | alpha_media=0.2444 | |grad|_medio=0.000045 (n=500)
+step 3000/3515 | epoch 1 | loss 1.6850 | 4.4 steps/s
+  [traza step 3500] bloque 0: rápido=80 medio=276 lento=156 | alpha_media=0.2444 | |grad|_medio=0.000141 (n=500)
+  [traza step 3500] bloque 1: rápido=81 medio=274 lento=157 | alpha_media=0.2453 | |grad|_medio=0.000078 (n=500)
+  [traza step 3500] bloque 2: rápido=81 medio=274 lento=157 | alpha_media=0.2451 | |grad|_medio=0.000058 (n=500)
+  [traza step 3500] bloque 3: rápido=82 medio=273 lento=157 | alpha_media=0.2450 | |grad|_medio=0.000045 (n=500)
+  [traza step 3500] bloque 4: rápido=80 medio=277 lento=155 | alpha_media=0.2446 | |grad|_medio=0.000052 (n=500)
+step 3500/3515 | epoch 1 | loss 1.7007 | 5.0 steps/s
+eva: pico de memoria del proceso 357.0 MB
+
+── qué sostiene la memoria de entrenamiento ──
+  parámetros                51.1 MB   (inevitable)
+  estado de AdamW          102.3 MB   (inevitable hoy)
+  GRAFO, pico propio         1.3 MB
+  nodos vivos, pico          124
+  grafo vivo ahora           0.0 MB   (0 si se liberó todo)
+  MAPA DE GRADIENTES        51.1 MB   <- un Vec nuevo por tensor, cada paso
+
+── quién guarda, acumulado sobre todo el entrenamiento ──
+  clockmem            2479.8 MB en   19530 nodos     50%
+  sigmoid             2479.4 MB en   39060 nodos     50%
+  add                    5.7 MB en  136710 nodos      0%
+  matmul                 3.2 MB en  140616 nodos      0%
+  gather                 2.0 MB en    3906 nodos      0%
+  ce                     1.9 MB en    3906 nodos      0%
+  rms_norm               1.2 MB en   62496 nodos      0%
+  mul                    0.9 MB en   19530 nodos      0%
+  copias de parámetros por Arc compartido: 0  (tiene que ser 0)
+eva: VALIDACIÓN FINAL loss 1.7941 | 2.588 bits/byte (391 ventanas, arch clock)
+eva: regla 'todo' | 3515 forward, 3515 backward (100% aprendidos)
+eva: entrenamiento terminado en 740.4s, pesos en 16m5b_seed7_temp13.weights
+=== termina vie 14 ago 2026 03:01:24 -03 ===

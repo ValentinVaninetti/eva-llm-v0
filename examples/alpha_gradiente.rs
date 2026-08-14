@@ -24,15 +24,17 @@ use eva_llm_v0::tensor::autograd::backward;
 use eva_llm_v0::tensor::ops;
 use std::io::Write;
 
-// Respeta EVA_ALPHA_ANTISAT: el checkpoint pudo entrenarse con
-// algebraic_sigmoid (Ronda 4) en vez de sigmoid -- mismas fórmulas que
-// clock.rs (privadas ahí, duplicadas acá igual que en otros scripts de hoy).
+// Respeta EVA_ALPHA_ANTISAT (algebraic_sigmoid) y EVA_ALPHA_TEMP
+// (sigmoid(z/T)) -- el checkpoint pudo entrenarse con cualquiera de las
+// dos. Mismas fórmulas que clock.rs (privadas ahí, duplicadas acá igual
+// que en otros scripts de hoy).
 fn antisat() -> bool { std::env::var("EVA_ALPHA_ANTISAT").is_ok() }
+fn temperatura() -> f32 { std::env::var("EVA_ALPHA_TEMP").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0) }
 fn sigmoid(x: f32) -> f32 {
-    if antisat() { 0.5 * (1.0 + x / (1.0 + x * x).sqrt()) } else { 1.0 / (1.0 + (-x).exp()) }
+    if antisat() { 0.5 * (1.0 + x / (1.0 + x * x).sqrt()) } else { 1.0 / (1.0 + (-x / temperatura()).exp()) }
 }
 fn logit(p: f32) -> f32 {
-    if antisat() { (2.0 * p - 1.0) / (2.0 * (p * (1.0 - p)).sqrt()) } else { (p / (1.0 - p)).ln() }
+    if antisat() { (2.0 * p - 1.0) / (2.0 * (p * (1.0 - p)).sqrt()) } else { temperatura() * (p / (1.0 - p)).ln() }
 }
 
 fn bpb_total(model: &eva_llm_v0::model::EvaModel, ds: &TextDataset, from: usize, to: usize) -> f32 {
@@ -104,7 +106,12 @@ fn main() {
     println!("=== PARTE 1: gradiente de la pérdida respecto de log_clock, {n_muestras} ventanas ===");
     println!("  convención: grad>0 empuja alpha MÁS CHICO (rápido) en el próximo paso; grad<0 empuja MÁS GRANDE (lento)\n");
 
-    let mut archivo = std::fs::File::create("/tmp/alpha_gradiente_bruto.csv")
+    // Nombre derivado del checkpoint -- si no, correr esto sobre dos
+    // checkpoints distintos pisa el resultado bruto del primero (ya me
+    // pasó una vez esta noche).
+    let base = std::path::Path::new(&weights).file_stem().unwrap().to_string_lossy();
+    let ruta_csv = format!("/tmp/alpha_gradiente_bruto_{base}.csv");
+    let mut archivo = std::fs::File::create(&ruta_csv)
         .expect("no pude crear el archivo de resultado bruto");
     writeln!(archivo, "bloque,canal,alpha,grad_medio,abs_grad_medio,desvio_grad").unwrap();
 
@@ -152,7 +159,7 @@ fn main() {
     let corr_global_abs = pearson(&alphas_todas, &abs_grads_todas);
     println!("\n  correlación GLOBAL (alpha, grad firmado)  = {corr_global:.3}   (pregunta D)");
     println!("  correlación GLOBAL (alpha, |grad|)        = {corr_global_abs:.3}   (pregunta B: negativa = rápidos reciben más señal)");
-    println!("  resultado bruto (2560 filas) en /tmp/alpha_gradiente_bruto.csv");
+    println!("  resultado bruto (2560 filas) en {ruta_csv}");
 
     // ================= PARTE 2: perturbación finita =================
     println!("\n=== PARTE 2: perturbación finita, sin reentrenar ===");

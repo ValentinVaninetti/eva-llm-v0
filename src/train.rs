@@ -4,11 +4,72 @@ use crate::data::TextDataset;
 use crate::model::{EvaConfig, EvaModel};
 use crate::nn::Module;
 use crate::optim::AdamW;
+use crate::model::block::Mixer;
 use crate::recall::Recall;
 use crate::save::{load_model, save_model};
 use crate::tensor::autograd::backward;
 use crate::tensor::Tensor;
 use crate::tokenizer::ByteTokenizer;
+
+// Ronda 4, segunda intervención de GPT sobre el achatamiento de `alpha`:
+// traza periódica del gradiente de `log_clock` DURANTE el entrenamiento,
+// no sólo en el checkpoint final -- "quiero ver dónde empieza a
+// separarse la trayectoria". Gratis: son los MISMOS gradientes que ya
+// se calculan para el paso del optimizador, ninguna pasada extra.
+// Detrás de `EVA_ALPHA_TRACE=<n>` (cada n pasos), apagado por defecto.
+struct Traza {
+    cada: usize,
+    suma_abs: Vec<Vec<f64>>,
+    n: usize,
+}
+
+impl Traza {
+    fn desde_env(n_blocks: usize, dim: usize) -> Option<Self> {
+        let cada = std::env::var("EVA_ALPHA_TRACE").ok()?.parse::<usize>().ok()?;
+        if cada == 0 { return None; }
+        Some(Traza { cada, suma_abs: vec![vec![0.0; dim]; n_blocks], n: 0 })
+    }
+
+    fn acumular(&mut self, model: &EvaModel, grads: &std::collections::HashMap<usize, Vec<f32>>) {
+        for (bi, block) in model.blocks.iter().enumerate() {
+            if let Mixer::Clock(clock) = &block.mixer {
+                if let Some(g) = grads.get(&clock.log_clock.id) {
+                    for (c, &gv) in g.iter().enumerate() {
+                        self.suma_abs[bi][c] += gv.abs() as f64;
+                    }
+                }
+            }
+        }
+        self.n += 1;
+    }
+
+    fn tal_vez_imprimir(&mut self, model: &EvaModel, step: usize) {
+        if step % self.cada != 0 { return; }
+        for (bi, block) in model.blocks.iter().enumerate() {
+            let Mixer::Clock(clock) = &block.mixer else { continue };
+            let dim = clock.log_clock.data.len();
+            let (mut rapido, mut medio, mut lento) = (0usize, 0usize, 0usize);
+            let mut suma_alpha = 0.0f64;
+            let antisat = std::env::var("EVA_ALPHA_ANTISAT").is_ok();
+            let temp = std::env::var("EVA_ALPHA_TEMP").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
+            for c in 0..dim {
+                let lc = clock.log_clock.data[c];
+                let a = if antisat {
+                    0.5 * (1.0 + lc / (1.0 + lc * lc).sqrt())
+                } else {
+                    1.0 / (1.0 + (-lc / temp).exp())
+                };
+                suma_alpha += a as f64;
+                if a < 0.05 { rapido += 1 } else if a < 0.3 { medio += 1 } else { lento += 1 }
+            }
+            let ga_medio: f64 = self.suma_abs[bi].iter().sum::<f64>() / dim as f64 / self.n.max(1) as f64;
+            println!("  [traza step {step}] bloque {bi}: rápido={rapido} medio={medio} lento={lento} | alpha_media={:.4} | |grad|_medio={:.6} (n={})",
+                suma_alpha / dim as f64, ga_medio, self.n);
+        }
+        for v in self.suma_abs.iter_mut() { v.iter_mut().for_each(|x| *x = 0.0); }
+        self.n = 0;
+    }
+}
 
 // Ronda 3, benchmark final: el gate como regularizador de entrenamiento,
 // receta consolidada por Dante -- "enseñar donde la tabla es determinística,
@@ -169,6 +230,11 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
         None
     };
 
+    let mut traza = Traza::desde_env(model.blocks.len(), mcfg.dim);
+    if traza.is_some() {
+        println!("eva: TRAZA de alpha/gradiente ACTIVA (EVA_ALPHA_TRACE)");
+    }
+
     let total_steps = n_train * tcfg.epochs;
     let mut step = 0usize;
     let mut running = 0.0f32;
@@ -233,6 +299,9 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
                 };
                 if let Some(grads) = grads {
                     bwd += 1;
+                    if let Some(tr) = traza.as_mut() {
+                        tr.acumular(&model, &grads);
+                    }
                     let mut params = model.parameters_mut();
                     crate::prof::time(crate::prof::P::Optim, || opt.step(&mut params, &grads));
                 }
@@ -241,6 +310,10 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
 
             running += loss_v;
             step += 1;
+
+            if let Some(tr) = traza.as_mut() {
+                tr.tal_vez_imprimir(&model, step);
+            }
 
             if step % tcfg.log_every == 0 {
                 let avg = running / tcfg.log_every as f32;

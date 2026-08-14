@@ -14,8 +14,36 @@ fn antisat() -> bool {
     std::env::var("EVA_ALPHA_ANTISAT").is_ok()
 }
 
+/// Ronda 4, segunda intervención (a pedido de GPT, tras encontrar que
+/// `algebraic_sigmoid` no tocaba la región correcta): temperatura sobre
+/// EL MISMO sigmoid, `alpha=sigmoid(z/T)` con T>1. A diferencia de
+/// `algebraic_sigmoid`, esto NO cambia la forma de la curva -- estira el
+/// mismo sigmoid, así que a un `z` dado (el mismo que ya tenía cualquier
+/// canal) le corresponde MÁS derivada, verificado con script antes de
+/// tocar código: en z=-3..-5 (donde vive la banda rápida hoy), T=1.3 da
+/// ~1.4x-2.4x más derivada que T=1. Elegí T=1.3 explícitamente para eso,
+/// no un valor redondo porque sí.
+///
+/// TRADE-OFF explícito, no escondido: para que "sólo cambie T" sea
+/// literal en el código (mismos valores de `log_clock` al arrancar, cero
+/// cambio en la inicialización), el `alpha` INICIAL se corre un poco
+/// (menos extremo -- con T=1.3, alpha=0.018 al init pasa a ≈0.044). No
+/// hay forma de tener EXACTAMENTE el mismo alpha inicial Y más derivada
+/// ahí a la vez con una sola familia de reparametrización (es la misma
+/// razón por la que `algebraic_sigmoid` con inversa ajustada terminó
+/// dándole MENOS señal a la banda rápida, no más). Se opta acá por
+/// preservar el `z` (lo que el optimizador realmente ve), no el `alpha`.
+fn temperatura() -> f32 {
+    std::env::var("EVA_ALPHA_TEMP").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0)
+}
+
 fn alpha_squash(z: &Tensor) -> Tensor {
-    if antisat() { ops::algebraic_sigmoid(z) } else { ops::sigmoid(z) }
+    if antisat() {
+        ops::algebraic_sigmoid(z)
+    } else {
+        let t = temperatura();
+        if t != 1.0 { ops::sigmoid(&ops::scale(z, 1.0 / t)) } else { ops::sigmoid(z) }
+    }
 }
 
 /// Inversa de `alpha_squash`, sólo para inicializar `log_clock` apuntando

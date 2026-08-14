@@ -3,7 +3,7 @@
 > Para quien se incorpora (Orfeo, Qwen3, quien venga): **leé esto primero**.
 > La historia, la conversación y cada medición están en `ONCE-DECISIONES.md`
 > (3000+ líneas). Acá está el estado al día, con punteros al gigante para
-> profundizar. Actualizado: 12-08-2026.
+> profundizar. Actualizado: 14-08-2026.
 
 > ⚠️ **ANTES DE SEGUIR CON `mix.rs` / `softmax_rows` / la suma de logits:**
 > nuestra hipótesis central Y el fracaso de hoy de `mixed_ce` **ya están
@@ -55,11 +55,21 @@
 - **Autocontraste como segunda parte:** es MC dropout, con abuela. | 1517
 - **Gradient checkpointing (de BitVMX):** el grafo es 8 MB de 282 → no vale. | 1244
 - **Crédito local por aporte:** −3.6% de calidad. | 794
+- **Achatamiento del espectro de `alpha` — mecanismo explicado (artefacto, no elección):** el colapso era saturación del sigmoid (trampa absorbente cerca de alpha≈0), no preferencia de la loss. Benchmark causal: corr(alpha, grad_firmado)≈−0.001, perturbaciones ~0, |grad| 20-100x menor en banda rápida explicado por α(1−α). `sigmoid(z/T)` con T=1,3: bpb 2.588 vs 2.594 (sin costo), espectro final 16/54/30 estable desde un init 16/53/30 (T=1 colapsa desde init balanceado 35/39/26 a 98/2/0). Predicción pre-registrada, cumplida. T=1,3 queda como flag `EVA_ALPHA_TEMP`, no default. Pregunta viva: ¿el espectro distribuido paga con data de largo alcance? | `TRABAJO-2026-08-12.md` (final) |
 
 ## Hilos abiertos hoy
 
-1. **Bisector de BitVMX** — candidata para pensar, nada construido. Localizar *dónde* arranca a fallar una respuesta usando la traza por token de `scan()` (`bet.rs:265`). Siguiente paso: análisis de granularidad (tramo entero / mitad / change-point por token) sobre datos que ya existen. La corrección ya acordada: se biseca la **traza**, no el texto. | 2684, 2743
-2. **Pregunta de Orfeo a Valentín:** prioridad entre "no inventar", "gastar menos" y "modular". Es la única que le toca decidir a Valentín. | 2853
+1. **¿El espectro de `alpha` distribuido (T=1,3) paga con data de largo
+   alcance?** El objetivo es indiferente a la distribución de alpha (bpb
+   igual 2.588 vs 2.594); la pregunta es si la palanca data (corpus con
+   estructura de largo alcance, o sintético con dependencias controladas a
+   distancia N) premia el espectro distribuido. Par a medir: T=1 vs T=1,3
+   sobre esa data, no sobre prosa250.
+2. **Pregunta de Orfeo a Valentín:** prioridad entre "no inventar", "gastar
+   menos" y "modular". Es la única que le toca decidir a Valentín. | 2853
+3. **Bisector de BitVMX** — en pausa; el análisis de granularidad (ronda del
+   12) cerró con change-point AUROC 0.672 pero payoff real insuficiente
+   (14,6% de cobertura). No construir encima sin número nuevo.
 
 ## Cómo se usa este archivo
 

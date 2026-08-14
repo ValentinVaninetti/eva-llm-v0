@@ -231,6 +231,78 @@ Están documentadas en el encabezado de cada archivo, pero conviene tenerlas jun
 La moraleja de las tres, y de la que más duele: **la intuición decía "optimizá el
 shader" y eran los flags de memoria.** Medir primero, partido en fases.
 
+## El reloj se achataba solo, y no era el objetivo el que lo quería así
+
+Arriba dice "cada canal elige la escala de tiempo que necesita". Medido
+después de entrenar, eso era falso en la práctica: el 98% de los canales
+terminaba con memoria efectiva menor a 10 tokens, sin importar el
+checkpoint, el corpus (250 KB o 411 KB) ni el largo de ventana (64 a
+512, 8x de rango). Sólo un puñado de canales por bloque conservaba algo
+de memoria larga. La promesa de "multi-escala por canal" se sostenía en
+el diseño, no en lo que salía de entrenar.
+
+**La pregunta no era "por qué pasa" sino "quién lo elige": ¿la pérdida
+prefiere memoria corta, o algo en la parametrización lo empuja ahí sin
+que a la pérdida le importe?** Se puede medir directo, sin especular:
+gradiente real de la pérdida respecto de `log_clock` (el parámetro
+crudo detrás de `alpha`), agregado sobre cientos de ventanas de
+validación nunca vistas.
+
+```
+correlación(alpha, gradiente firmado)     = -0.001   -- sin sesgo hacia rápido
+correlación(alpha, |gradiente|)           = +0.538   -- los canales rápidos
+                                                         reciben CASI NINGUNA señal
+```
+
+Perturbar canales individuales a mano (α×0,5 y α×2, sin reentrenar) no
+mueve el bpb en casi ningún caso -- la pérdida es indiferente, canal por
+canal, a dónde esté el reloj. La explicación no necesita que el objetivo
+"prefiera" nada: `d(alpha)/d(log_clock) = alpha·(1-alpha)`, la derivada
+del sigmoid. En alpha≈0,01 ese factor es ~0,01; en alpha≈0,3 es ~0,21 --
+veinte veces más señal en la zona lenta que en la rápida, sólo por la
+forma de la curva. Cerca de alpha=0 el circuito de aprendizaje del
+propio `alpha` se corta solo. Es una **trampa de saturación** de la
+parametrización, no una decisión del entrenamiento.
+
+**El arreglo, una sola línea real:** `alpha = sigmoid(z/T)` con T=1,3 en
+vez de T=1 -- mismo rango, mismo significado, sólo estira dónde vive el
+gradiente útil. Sin op nueva (compone `scale` + `sigmoid`, las dos ya
+gradcheckeadas).
+
+| | rápido (<10 tok) | medio (10-100) | lento (>100) | bpb |
+|---|---|---|---|---|
+| T=1 (de siempre) | 98% | 2% | ~0% | 2.594 |
+| T=1,3 | ~16% | ~54% | ~30% | **2.588** |
+
+El espectro se distribuye de verdad, **al mismo costo** -- si acaso un
+poco mejor. Y la traza del entrenamiento entero (no sólo el checkpoint
+final) muestra que T=1 arranca balanceado (35/39/26 al inicializar) y
+**colapsa entrenando**; T=1,3 arranca en 16/53/30 y se queda ahí, estable,
+los 3.515 pasos. El colapso no es el destino natural del sistema: es lo
+que pasa cuando el gradiente no puede llegar a decir lo contrario.
+
+Reproducido igual, número por número, en tres corridas independientes:
+esta máquina (GPU), esta máquina otra vez (bajo otra carga y otra
+temperatura), y un appliance con arquitectura y sistema operativo
+distintos, sin GPU. Bit a bit el mismo resultado en las tres.
+
+```sh
+EVA_ALPHA_TEMP=1.3 cargo run --release -- train --data data/prosa250.txt \
+  --dim 512 --ffn 1024 --blocks 5 --seq 64 --seed 7 --epochs 1
+```
+
+### Lo que esto NO dice todavía
+
+- **Que el espectro distribuido sirva para algo.** En este corpus da el
+  mismo bpb, no mejor -- "sin costo" no es "con beneficio". La pregunta
+  abierta es si paga con datos que tengan de verdad dependencias de
+  largo alcance (250 KB de prosa casi no las tiene). Es lo que se está
+  midiendo ahora, con un benchmark sintético construido para eso.
+- **Que el mecanismo sea exclusivo de ClockMem.** La trampa es una
+  propiedad de cualquier compuerta con forma sigmoid (LSTM, otros SSM
+  con squashing parecido) -- no se probó en ninguna otra arquitectura,
+  pero tampoco hay razón para pensar que es particular a esta.
+
 ## Roadmap
 
 - [x] Núcleo tensor + autograd + arquitectura EvaClock

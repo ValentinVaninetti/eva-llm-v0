@@ -17,6 +17,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "info" => cmd_info(&args[1..]),
         "gpu" => cmd_gpu(&args[1..]),
         "recall" => cmd_recall(&args[1..]),
+        "wprobe" => cmd_wprobe(&args[1..]),
         "ceiling" => cmd_ceiling(&args[1..]),
         "bet" => cmd_bet(&args[1..]),
         "stake" => cmd_stake(&args[1..]),
@@ -158,6 +159,28 @@ fn cmd_recall(args: &[String]) -> Result<(), String> {
         .map(|(k, p)| format!("{k}:{p:.0}%"))
         .collect();
     println!("  where the hits come from: {}", profile.join("  "));
+    Ok(())
+}
+
+/// Write-magnitude probe for the error-gated write (see `crate::probe`).
+///
+/// Sets `EVA_WRITE_ERROR=1` and `EVA_WRITE_ERROR_TRACE=1` itself, so it
+/// always measures the gate ON. `--from`/`--to` restrict the window slice
+/// (default: all windows).
+fn cmd_wprobe(args: &[String]) -> Result<(), String> {
+    check_unknown(args, &["weights", "data", "seq", "from", "to"])?;
+    let weights = flag(args, "weights").ok_or("wprobe requires --weights")?;
+    let data = flag(args, "data").ok_or("wprobe requires --data")?;
+    let model = load_model(&weights).map_err(|e| e.to_string())?;
+    let seq = flag_num(args, "seq", model.cfg.seq_len)?;
+    let ds = crate::data::TextDataset::from_file(&data, seq).map_err(|e| e.to_string())?;
+    let n = ds.num_windows();
+    let from = flag_num(args, "from", 0)?;
+    let to = flag_num(args, "to", n)?;
+    if from >= to || to > n {
+        return Err(format!("wprobe: invalid window range: from={from} to={to} of {n}"));
+    }
+    crate::probe::run(&model, &ds, from, to);
     Ok(())
 }
 

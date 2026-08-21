@@ -12,6 +12,7 @@ pub mod model;
 pub mod nn;
 pub mod optim;
 pub mod pool;
+pub mod probe;
 pub mod prof;
 pub mod recall;
 pub mod rng;

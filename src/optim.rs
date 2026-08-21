@@ -51,6 +51,12 @@ pub struct AdamW {
     pub beta2: f32,
     pub eps: f32,
     pub wd: f32,
+    /// Per-parameter learning-rate multiplier, keyed by tensor id. B2.1
+    /// gives the windowed readout a separate, scaled LR. An empty map is a
+    /// plain AdamW. (Note: this is a real LR multiplier applied inside the
+    /// step -- scaling the GRADIENT instead would cancel out, because Adam
+    /// normalizes by the second moment.)
+    pub lr_mult: HashMap<usize, f32>,
     t: usize,
     state: HashMap<usize, (Vec<f32>, Vec<f32>)>,
 }
@@ -75,7 +81,16 @@ struct Consts {
 
 impl AdamW {
     pub fn new(lr: f32, wd: f32) -> Self {
-        AdamW { lr, beta1: 0.9, beta2: 0.999, eps: 1e-8, wd, t: 0, state: HashMap::new() }
+        AdamW {
+            lr,
+            beta1: 0.9,
+            beta2: 0.999,
+            eps: 1e-8,
+            wd,
+            lr_mult: HashMap::new(),
+            t: 0,
+            state: HashMap::new(),
+        }
     }
 
     pub fn step(&mut self, params: &mut [&mut Tensor], grads: &HashMap<usize, Vec<f32>>) {
@@ -96,6 +111,11 @@ impl AdamW {
         for p in params.iter_mut() {
             let Some(g) = grads.get(&p.id) else { continue };
             debug_assert_eq!(g.len(), p.data.len(), "grad shape mismatch for param {}", p.id);
+            // Per-parameter LR multiplier (Consts is Copy: cheap to adjust).
+            let mut c = c;
+            if let Some(mult) = self.lr_mult.get(&p.id) {
+                c.lr = self.lr * *mult;
+            }
             let (m, v) = self
                 .state
                 .entry(p.id)

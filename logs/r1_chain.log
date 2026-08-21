@@ -1,0 +1,7 @@
+=== [1/3] inject replica (r2) ===
+inject_r2 done: eva: rule 'all' | 1800 forward, 1800 backward (100% learned)
+=== [2/3] R1a (windowed read, no q*g, df-seeded) ===
+r1a done: eva: rule 'all' | 1800 forward, 1800 backward (100% learned)
+=== [3/3] R1b (windowed read, no q*g, zero init) ===
+r1b done: eva: rule 'all' | 1800 forward, 1800 backward (100% learned)
+=== ALL THREE TRAINING RUNS FINISHED ===

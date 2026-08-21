@@ -1,0 +1,72 @@
+eva entity_retrieval: 16m5b_quijote_SSM.weights | data/quijote.txt
+  seq=512 windows: 3875 train, 431 val (contiguous cut)
+  mode: independent windows (as trained) | EVA_ALPHA_TEMP=1.0 | min_count=30 | EVA_SSM_ALPHA=0.999 (fixed clock)
+
+  entities detected (43 pass the filter, top 12 shown):
+     1. Quijote              count= 2230 ratio=1.00
+     2. Sancho               count= 2171 ratio=1.00
+     3. Dios                 count=  511 ratio=0.98
+     4. Panza                count=  348 ratio=1.00
+     5. Dulcinea             count=  283 ratio=1.00
+     6. Rocinante            count=  204 ratio=1.00
+     7. Mancha               count=  178 ratio=0.99
+     8. Toboso               count=  163 ratio=1.00
+     9. Camila               count=  148 ratio=1.00
+    10. Lotario              count=  140 ratio=1.00
+    11. Anselmo              count=  138 ratio=1.00
+    12. Fernando             count=  135 ratio=1.00
+[eva] matmul on GPU: NVIDIA GeForce GTX 1650
+
+=== VAL (recurrent entity-first-byte positions) ===
+  bucket                               n  top1%  top5% mean_lnp     Δlnp  rank name_bpb
+  d <= 32                             12   8.33  16.67    4.510   +0.892  18.7    2.432
+  32 < d <= 128                      116  50.00  50.00    2.635   -0.983   9.8    1.042
+  128 < d <= 256                     182  39.56  43.96    3.111   -0.507  11.4    1.725
+  256 < d <= 512                      91  39.56  40.66    3.364   -0.254  12.9    1.732
+  prior OUTSIDE window (no memory)  1039  29.36  33.97    3.618      NaN  13.8    2.256
+  cold (first occurrence)              0   0.00   0.00    0.000      NaN   0.0    0.000
+
+  per-entity detail (Δlnp vs that entity's 'outside window' reference):
+  entity             count       d32      d128      d256      d512     nowin
+  Quijote             2230    +0.013    -0.176    -0.171    -0.110 0.3688734
+  Sancho              2171    +1.164    -0.157    -0.012    +0.318 3.8876262
+  Dios                 511         -         -    +0.652         - 5.3871655
+  Panza                348         -    +0.807    -0.726    +1.160  3.532103
+  Dulcinea             283         -    +0.536    +0.239    -0.659  4.734175
+  Rocinante            204         -         -    +0.069         - 5.7030454
+  Mancha               178         -         -    -0.237    -0.328 4.2450247
+  Toboso               163         -    -0.273    -0.490    -0.184 3.7183151
+
+=== TRAIN (recurrent entity-first-byte positions) ===
+  bucket                               n  top1%  top5% mean_lnp     Δlnp  rank name_bpb
+  d <= 32                            107  13.08  27.10    4.332   +0.635  16.4    1.234
+  32 < d <= 128                      727  35.08  42.37    3.319   -0.379  12.5    1.043
+  128 < d <= 256                     864  37.38  43.98    3.276   -0.422  12.4    1.096
+  256 < d <= 512                     593  36.93  45.36    3.180   -0.517  11.7    0.938
+  prior OUTSIDE window (no memory)  6957  28.72  35.60    3.697      NaN  14.3    1.462
+  cold (first occurrence)             43   2.33  11.63    5.487      NaN  23.7    4.689
+
+  per-entity detail (Δlnp vs that entity's 'outside window' reference):
+  entity             count       d32      d128      d256      d512     nowin
+  Quijote             2230    -0.132    -0.080    -0.083    -0.077 0.27285495
+  Sancho              2171    +0.505    -0.367    -0.431    -0.240 3.7614892
+  Dios                 511    +0.743    +0.095    +0.073    -0.195 5.4586606
+  Panza                348    +1.151    +0.114    +0.021    +0.125 3.3337438
+  Dulcinea             283    +0.091    -0.638    +0.350    -0.733 4.7021875
+  Rocinante            204    -0.797    +0.207    -0.136    -0.018  5.824903
+  Mancha               178    +0.961    -0.962    -1.282    -0.360  4.239201
+  Toboso               163    -0.131    -0.227    -0.281    +0.395 3.8616753
+  Camila               148    +1.552    -0.246    -0.207    -0.094 6.1653485
+  Lotario              140    +1.172    -0.215    +0.235    +0.271  6.084248
+  Anselmo              138         -    -0.201    +0.333    +0.178  6.072469
+  Fernando             135    -0.201    -0.151    -0.255    +0.312 2.8771832
+
+notes:
+  - mean_lnp/rank are measured on the entity's FIRST byte.
+  - Δlnp vs 'prior OUTSIDE window (no memory)': positive means the model puts MORE probability on
+    the entity's byte when it saw the entity before at that distance.
+  - no-carry mode has no 'outside window' reference: long-distance buckets are
+    the decay curve themselves (and 'cold' the no-memory extreme).
+  - 'prior OUTSIDE window' is the de-facto >512 no-memory baseline for
+    the architecture as trained (windows independent).
+  - temperature must match training (T=1.3 checkpoint -> EVA_ALPHA_TEMP=1.3).

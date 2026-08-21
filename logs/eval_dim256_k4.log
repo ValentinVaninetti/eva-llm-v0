@@ -1,0 +1,43 @@
+eva eval_associative: 16m5b_assoc_k4ctl_d256_clock.weights | data/assoc_k4ctl_seq512_win22500_seed42.dat | seq=512
+  windows: 20249 train, 2250 val (contiguous cut)
+  scoring a capped sample: 300 val windows, 300 train windows
+
+[eva] matmul on GPU: NVIDIA GeForce GTX 1650
+=== VAL (unseen text) ===
+  bucket               n    acc%      bpb
+  gap<=32           7561   62.66   1.5163
+  32<gap<=128       5641   32.51   2.7342
+  128<gap<=256       366    5.74   5.3374
+  256<gap<=512         8    0.00   7.1429
+  gap>512              0    0.00   0.0000
+  binding (cold)    1200    2.75   5.9583   <- unpredictable by construction (first occurrence)
+  filler          138824    2.77   7.4221   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+
+  what the top-1 prediction IS at query positions (n=13576):
+    this key's bound value (correct)     48.56%
+    ANOTHER key's bound value            43.97%   <- the coin-flip signature
+    a value byte bound to nobody here     7.47%
+    not even a value byte                 0.00%
+  reading: if 'another key's bound value' absorbs most of the errors, the model
+  narrowed to the right candidate SET but did not learn the key->value BINDING.
+
+=== TRAIN (memorization reference) ===
+  bucket               n    acc%      bpb
+  gap<=32           7545   65.16   1.4534
+  32<gap<=128       5814   33.92   2.6390
+  128<gap<=256       332    5.42   5.3793
+  256<gap<=512         6   16.67   5.5583
+  gap>512              0    0.00   0.0000
+  binding (cold)    1200    4.00   5.8529   <- unpredictable by construction (first occurrence)
+  filler          138703    2.71   7.4203   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+
+  what the top-1 prediction IS at query positions (n=13697):
+    this key's bound value (correct)     50.43%
+    ANOTHER key's bound value            43.97%   <- the coin-flip signature
+    a value byte bound to nobody here     5.60%
+    not even a value byte                 0.00%
+  reading: if 'another key's bound value' absorbs most of the errors, the model
+  narrowed to the right candidate SET but did not learn the key->value BINDING.
+

@@ -1,0 +1,43 @@
+warning: fields `at` and `in_slot` are never read
+  --> src/constrain.rs:84:5
+   |
+78 | pub struct Skeleton {
+   |            -------- fields in this struct
+...
+84 |     at: usize,
+   |     ^^
+85 |     /// How many bytes the current hole has emitted so far.
+86 |     in_slot: usize,
+   |     ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `eva_llm_v0` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.00s
+     Running `target/release/examples/eval_associative 16m5b_assoc_k2_seq2048_attn.weights data/assoc_k2_seq2048_win375_seed42.dat`
+eva eval_associative: 16m5b_assoc_k2_seq2048_attn.weights | data/assoc_k2_seq2048_win375_seed42.dat | seq=2048
+  windows: 337 train, 37 val (contiguous cut)
+
+[eva] matmul on GPU: NVIDIA GeForce GTX 1650
+=== VAL (unseen text) ===
+  bucket               n    acc%      bpb
+  gap<=32           1346    2.01   5.4393
+  32<gap<=128       1649    1.39   5.4319
+  128<gap<=256       115    0.87   5.5607
+  256<gap<=512         7    0.00   5.5447
+  gap>512              0    0.00   0.0000
+  binding (cold)      74    1.35   5.4523   <- unpredictable by construction (first occurrence)
+  filler           72585    2.29   7.5630   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+
+=== TRAIN (memorization reference) ===
+  bucket               n    acc%      bpb
+  gap<=32          11749    4.01   5.2025
+  32<gap<=128      15555    3.85   5.2021
+  128<gap<=256      1017    4.03   5.2465
+  256<gap<=512        37    0.00   5.2818
+  gap>512              0    0.00   0.0000
+  binding (cold)     674    3.86   5.2035   <- unpredictable by construction (first occurrence)
+  filler          661144    2.65   7.5057   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+

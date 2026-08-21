@@ -1,0 +1,5 @@
+eva: EVA_READ_LR=10: readout lr scaled on 5 wread params
+eva: dataset 512001 bytes, 1000 windows, 14063621 params
+eva: 900 windows to train on, 100 to validate
+[eva] matmul on GPU: NVIDIA GeForce GTX 1650
+step 250/1800 | epoch 1 | loss 5.6014 | 1.4 steps/s

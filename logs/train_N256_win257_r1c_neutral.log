@@ -1,0 +1,251 @@
+eva: dataset 512001 bytes, 1000 windows, 13410821 params
+eva: 900 windows to train on, 100 to validate
+eva: alpha/gradient TRACE ACTIVE (EVA_ALPHA_TRACE)
+eva: wread TRACE ACTIVE (EVA_WREAD_TRACE)
+[eva] matmul on GPU: NVIDIA GeForce GTX 1650
+  [r1c trace step 50] block 0: alpha_read mean=-0.000008 |da|mean=0.215560 max=1.001474 | inv_beta mean=1.001198 |di|mean=0.002309 max=0.009100
+  [r1c trace step 50] block 1: alpha_read mean=0.000051 |da|mean=0.215489 max=0.996017 | inv_beta mean=1.000710 |di|mean=0.002164 max=0.008503
+  [r1c trace step 50] block 2: alpha_read mean=0.000017 |da|mean=0.215521 max=0.996626 | inv_beta mean=1.000170 |di|mean=0.002082 max=0.007771
+  [r1c trace step 50] block 3: alpha_read mean=0.000024 |da|mean=0.215517 max=0.998726 | inv_beta mean=1.000115 |di|mean=0.002069 max=0.007100
+  [r1c trace step 50] block 4: alpha_read mean=0.000121 |da|mean=0.215401 max=0.993368 | inv_beta mean=0.999836 |di|mean=0.002049 max=0.007846
+  [r1c trace step 100] block 0: alpha_read mean=0.000421 |da|mean=0.215070 max=1.003747 | inv_beta mean=1.006492 |di|mean=0.007086 max=0.020560
+  [r1c trace step 100] block 1: alpha_read mean=0.000372 |da|mean=0.215146 max=0.997492 | inv_beta mean=1.003425 |di|mean=0.004396 max=0.015824
+  [r1c trace step 100] block 2: alpha_read mean=0.000392 |da|mean=0.215112 max=0.991750 | inv_beta mean=1.001941 |di|mean=0.003632 max=0.012505
+  [r1c trace step 100] block 3: alpha_read mean=0.000456 |da|mean=0.215033 max=0.991765 | inv_beta mean=1.001015 |di|mean=0.003436 max=0.013454
+  [r1c trace step 100] block 4: alpha_read mean=0.000482 |da|mean=0.215005 max=0.990011 | inv_beta mean=1.000693 |di|mean=0.003403 max=0.013399
+  [r1c trace step 150] block 0: alpha_read mean=0.001444 |da|mean=0.213885 max=1.009027 | inv_beta mean=1.017555 |di|mean=0.018151 max=0.042359
+  [r1c trace step 150] block 1: alpha_read mean=0.001797 |da|mean=0.213519 max=0.997884 | inv_beta mean=1.009586 |di|mean=0.010638 max=0.033305
+  [r1c trace step 150] block 2: alpha_read mean=0.002154 |da|mean=0.213139 max=0.986766 | inv_beta mean=1.006173 |di|mean=0.007983 max=0.028602
+  [r1c trace step 150] block 3: alpha_read mean=0.002294 |da|mean=0.212959 max=0.982611 | inv_beta mean=1.004299 |di|mean=0.007089 max=0.026632
+  [r1c trace step 150] block 4: alpha_read mean=0.002416 |da|mean=0.212820 max=0.979553 | inv_beta mean=1.003723 |di|mean=0.006527 max=0.025426
+  [r1c trace step 200] block 0: alpha_read mean=0.003956 |da|mean=0.210987 max=1.016533 | inv_beta mean=1.029506 |di|mean=0.030669 max=0.063894
+  [r1c trace step 200] block 1: alpha_read mean=0.004929 |da|mean=0.209971 max=0.997240 | inv_beta mean=1.016007 |di|mean=0.017827 max=0.049791
+  [r1c trace step 200] block 2: alpha_read mean=0.005452 |da|mean=0.209470 max=0.981477 | inv_beta mean=1.010620 |di|mean=0.013092 max=0.039790
+  [r1c trace step 200] block 3: alpha_read mean=0.006012 |da|mean=0.208806 max=0.982690 | inv_beta mean=1.007968 |di|mean=0.011163 max=0.041333
+  [r1c trace step 200] block 4: alpha_read mean=0.006777 |da|mean=0.207966 max=0.975359 | inv_beta mean=1.008263 |di|mean=0.011401 max=0.039976
+  [trace step 250] block 0: fast=179 medium=199 slow=134 | mean_alpha=0.2147 | mean_|grad|=0.000095 (n=250)
+  [trace step 250] block 1: fast=179 medium=199 slow=134 | mean_alpha=0.2147 | mean_|grad|=0.000088 (n=250)
+  [trace step 250] block 2: fast=180 medium=198 slow=134 | mean_alpha=0.2148 | mean_|grad|=0.000079 (n=250)
+  [trace step 250] block 3: fast=180 medium=199 slow=133 | mean_alpha=0.2147 | mean_|grad|=0.000062 (n=250)
+  [trace step 250] block 4: fast=180 medium=198 slow=134 | mean_alpha=0.2146 | mean_|grad|=0.000091 (n=250)
+  [r1c trace step 250] block 0: alpha_read mean=0.005280 |da|mean=0.209475 max=1.018856 | inv_beta mean=1.033110 |di|mean=0.034513 max=0.072081
+  [r1c trace step 250] block 1: alpha_read mean=0.006199 |da|mean=0.208585 max=0.997116 | inv_beta mean=1.017473 |di|mean=0.019529 max=0.051198
+  [r1c trace step 250] block 2: alpha_read mean=0.006669 |da|mean=0.208158 max=0.980577 | inv_beta mean=1.011666 |di|mean=0.014326 max=0.041439
+  [r1c trace step 250] block 3: alpha_read mean=0.007165 |da|mean=0.207567 max=0.982793 | inv_beta mean=1.008965 |di|mean=0.012230 max=0.047248
+  [r1c trace step 250] block 4: alpha_read mean=0.008471 |da|mean=0.206098 max=0.974675 | inv_beta mean=1.009565 |di|mean=0.012899 max=0.041311
+step 250/1800 | epoch 1 | loss 4.5516 | 1.5 steps/s
+  [r1c trace step 300] block 0: alpha_read mean=0.005711 |da|mean=0.208985 max=1.019544 | inv_beta mean=1.034082 |di|mean=0.035571 max=0.074070
+  [r1c trace step 300] block 1: alpha_read mean=0.006635 |da|mean=0.208127 max=0.997172 | inv_beta mean=1.017784 |di|mean=0.019916 max=0.050883
+  [r1c trace step 300] block 2: alpha_read mean=0.007054 |da|mean=0.207759 max=0.980472 | inv_beta mean=1.011892 |di|mean=0.014591 max=0.041518
+  [r1c trace step 300] block 3: alpha_read mean=0.007513 |da|mean=0.207201 max=0.982743 | inv_beta mean=1.009176 |di|mean=0.012475 max=0.048551
+  [r1c trace step 300] block 4: alpha_read mean=0.008977 |da|mean=0.205552 max=0.974627 | inv_beta mean=1.009877 |di|mean=0.013297 max=0.042236
+  [r1c trace step 350] block 0: alpha_read mean=0.006022 |da|mean=0.208641 max=1.019899 | inv_beta mean=1.034626 |di|mean=0.036177 max=0.075220
+  [r1c trace step 350] block 1: alpha_read mean=0.006914 |da|mean=0.207848 max=0.997177 | inv_beta mean=1.017941 |di|mean=0.020124 max=0.050668
+  [r1c trace step 350] block 2: alpha_read mean=0.007308 |da|mean=0.207499 max=0.980389 | inv_beta mean=1.012011 |di|mean=0.014756 max=0.041505
+  [r1c trace step 350] block 3: alpha_read mean=0.007739 |da|mean=0.206969 max=0.982713 | inv_beta mean=1.009270 |di|mean=0.012606 max=0.049876
+  [r1c trace step 350] block 4: alpha_read mean=0.009293 |da|mean=0.205217 max=0.974622 | inv_beta mean=1.010058 |di|mean=0.013540 max=0.042054
+  [r1c trace step 400] block 0: alpha_read mean=0.006227 |da|mean=0.208417 max=1.020178 | inv_beta mean=1.035020 |di|mean=0.036624 max=0.076355
+  [r1c trace step 400] block 1: alpha_read mean=0.007116 |da|mean=0.207647 max=0.997180 | inv_beta mean=1.018023 |di|mean=0.020252 max=0.050403
+  [r1c trace step 400] block 2: alpha_read mean=0.007469 |da|mean=0.207326 max=0.980370 | inv_beta mean=1.012081 |di|mean=0.014871 max=0.041402
+  [r1c trace step 400] block 3: alpha_read mean=0.007883 |da|mean=0.206816 max=0.982668 | inv_beta mean=1.009361 |di|mean=0.012717 max=0.050666
+  [r1c trace step 400] block 4: alpha_read mean=0.009569 |da|mean=0.204933 max=0.974571 | inv_beta mean=1.010185 |di|mean=0.013779 max=0.048599
+  [r1c trace step 450] block 0: alpha_read mean=0.006415 |da|mean=0.208212 max=1.020474 | inv_beta mean=1.035317 |di|mean=0.036963 max=0.077020
+  [r1c trace step 450] block 1: alpha_read mean=0.007291 |da|mean=0.207478 max=0.997202 | inv_beta mean=1.018056 |di|mean=0.020328 max=0.049963
+  [r1c trace step 450] block 2: alpha_read mean=0.007639 |da|mean=0.207159 max=0.980335 | inv_beta mean=1.012121 |di|mean=0.014949 max=0.041614
+  [r1c trace step 450] block 3: alpha_read mean=0.008045 |da|mean=0.206655 max=0.982616 | inv_beta mean=1.009408 |di|mean=0.012805 max=0.050739
+  [r1c trace step 450] block 4: alpha_read mean=0.009829 |da|mean=0.204664 max=0.974561 | inv_beta mean=1.010230 |di|mean=0.013895 max=0.051683
+  [trace step 500] block 0: fast=178 medium=201 slow=133 | mean_alpha=0.2146 | mean_|grad|=0.000010 (n=250)
+  [trace step 500] block 1: fast=179 medium=199 slow=134 | mean_alpha=0.2147 | mean_|grad|=0.000008 (n=250)
+  [trace step 500] block 2: fast=180 medium=198 slow=134 | mean_alpha=0.2147 | mean_|grad|=0.000008 (n=250)
+  [trace step 500] block 3: fast=180 medium=199 slow=133 | mean_alpha=0.2146 | mean_|grad|=0.000008 (n=250)
+  [trace step 500] block 4: fast=180 medium=198 slow=134 | mean_alpha=0.2145 | mean_|grad|=0.000025 (n=250)
+  [r1c trace step 500] block 0: alpha_read mean=0.006550 |da|mean=0.208066 max=1.020674 | inv_beta mean=1.035531 |di|mean=0.037220 max=0.078010
+  [r1c trace step 500] block 1: alpha_read mean=0.007423 |da|mean=0.207329 max=0.997204 | inv_beta mean=1.018033 |di|mean=0.020353 max=0.049536
+  [r1c trace step 500] block 2: alpha_read mean=0.007737 |da|mean=0.207066 max=0.980308 | inv_beta mean=1.012112 |di|mean=0.014985 max=0.041785
+  [r1c trace step 500] block 3: alpha_read mean=0.008180 |da|mean=0.206514 max=0.982585 | inv_beta mean=1.009400 |di|mean=0.012846 max=0.050825
+  [r1c trace step 500] block 4: alpha_read mean=0.010013 |da|mean=0.204474 max=0.974569 | inv_beta mean=1.010247 |di|mean=0.013984 max=0.052207
+step 500/1800 | epoch 1 | loss 2.8048 | 1.5 steps/s
+  [r1c trace step 550] block 0: alpha_read mean=0.006718 |da|mean=0.207890 max=1.020913 | inv_beta mean=1.035660 |di|mean=0.037396 max=0.078323
+  [r1c trace step 550] block 1: alpha_read mean=0.007559 |da|mean=0.207193 max=0.997210 | inv_beta mean=1.017996 |di|mean=0.020361 max=0.049648
+  [r1c trace step 550] block 2: alpha_read mean=0.007838 |da|mean=0.206980 max=0.980294 | inv_beta mean=1.012075 |di|mean=0.014992 max=0.041423
+  [r1c trace step 550] block 3: alpha_read mean=0.008303 |da|mean=0.206396 max=0.982553 | inv_beta mean=1.009352 |di|mean=0.012868 max=0.051156
+  [r1c trace step 550] block 4: alpha_read mean=0.010171 |da|mean=0.204313 max=0.974570 | inv_beta mean=1.010211 |di|mean=0.014015 max=0.056089
+  [r1c trace step 600] block 0: alpha_read mean=0.006848 |da|mean=0.207756 max=1.021121 | inv_beta mean=1.035748 |di|mean=0.037524 max=0.079036
+  [r1c trace step 600] block 1: alpha_read mean=0.007672 |da|mean=0.207076 max=0.997206 | inv_beta mean=1.017927 |di|mean=0.020338 max=0.049876
+  [r1c trace step 600] block 2: alpha_read mean=0.007941 |da|mean=0.206885 max=0.980274 | inv_beta mean=1.012017 |di|mean=0.014978 max=0.041424
+  [r1c trace step 600] block 3: alpha_read mean=0.008394 |da|mean=0.206310 max=0.982536 | inv_beta mean=1.009297 |di|mean=0.012865 max=0.050882
+  [r1c trace step 600] block 4: alpha_read mean=0.010305 |da|mean=0.204172 max=0.974551 | inv_beta mean=1.010204 |di|mean=0.014088 max=0.062373
+  [r1c trace step 650] block 0: alpha_read mean=0.006977 |da|mean=0.207621 max=1.021271 | inv_beta mean=1.035812 |di|mean=0.037630 max=0.079843
+  [r1c trace step 650] block 1: alpha_read mean=0.007774 |da|mean=0.206983 max=0.997216 | inv_beta mean=1.017858 |di|mean=0.020315 max=0.050112
+  [r1c trace step 650] block 2: alpha_read mean=0.008036 |da|mean=0.206790 max=0.980254 | inv_beta mean=1.011967 |di|mean=0.014967 max=0.041479
+  [r1c trace step 650] block 3: alpha_read mean=0.008502 |da|mean=0.206204 max=0.982513 | inv_beta mean=1.009239 |di|mean=0.012858 max=0.050789
+  [r1c trace step 650] block 4: alpha_read mean=0.010459 |da|mean=0.204017 max=0.974529 | inv_beta mean=1.010135 |di|mean=0.014118 max=0.065590
+  [r1c trace step 700] block 0: alpha_read mean=0.007130 |da|mean=0.207463 max=1.021442 | inv_beta mean=1.035840 |di|mean=0.037697 max=0.080115
+  [r1c trace step 700] block 1: alpha_read mean=0.007893 |da|mean=0.206866 max=0.997230 | inv_beta mean=1.017756 |di|mean=0.020254 max=0.050456
+  [r1c trace step 700] block 2: alpha_read mean=0.008134 |da|mean=0.206698 max=0.980252 | inv_beta mean=1.011877 |di|mean=0.014927 max=0.041163
+  [r1c trace step 700] block 3: alpha_read mean=0.008624 |da|mean=0.206086 max=0.982487 | inv_beta mean=1.009156 |di|mean=0.012829 max=0.050901
+  [r1c trace step 700] block 4: alpha_read mean=0.010569 |da|mean=0.203909 max=0.974529 | inv_beta mean=1.010076 |di|mean=0.014169 max=0.068106
+  [trace step 750] block 0: fast=178 medium=201 slow=133 | mean_alpha=0.2146 | mean_|grad|=0.000005 (n=250)
+  [trace step 750] block 1: fast=179 medium=199 slow=134 | mean_alpha=0.2147 | mean_|grad|=0.000004 (n=250)
+  [trace step 750] block 2: fast=180 medium=198 slow=134 | mean_alpha=0.2147 | mean_|grad|=0.000004 (n=250)
+  [trace step 750] block 3: fast=180 medium=199 slow=133 | mean_alpha=0.2146 | mean_|grad|=0.000004 (n=250)
+  [trace step 750] block 4: fast=180 medium=198 slow=134 | mean_alpha=0.2145 | mean_|grad|=0.000018 (n=250)
+  [r1c trace step 750] block 0: alpha_read mean=0.007264 |da|mean=0.207328 max=1.021569 | inv_beta mean=1.035826 |di|mean=0.037726 max=0.080080
+  [r1c trace step 750] block 1: alpha_read mean=0.007986 |da|mean=0.206784 max=0.997210 | inv_beta mean=1.017632 |di|mean=0.020175 max=0.050418
+  [r1c trace step 750] block 2: alpha_read mean=0.008222 |da|mean=0.206620 max=0.980231 | inv_beta mean=1.011780 |di|mean=0.014892 max=0.041249
+  [r1c trace step 750] block 3: alpha_read mean=0.008713 |da|mean=0.206000 max=0.982497 | inv_beta mean=1.009063 |di|mean=0.012797 max=0.050694
+  [r1c trace step 750] block 4: alpha_read mean=0.010660 |da|mean=0.203824 max=0.974525 | inv_beta mean=1.010007 |di|mean=0.014189 max=0.071036
+step 750/1800 | epoch 1 | loss 2.7911 | 1.5 steps/s
+  [r1c trace step 800] block 0: alpha_read mean=0.007361 |da|mean=0.207231 max=1.021714 | inv_beta mean=1.035824 |di|mean=0.037758 max=0.079952
+  [r1c trace step 800] block 1: alpha_read mean=0.008067 |da|mean=0.206716 max=0.997225 | inv_beta mean=1.017521 |di|mean=0.020111 max=0.050713
+  [r1c trace step 800] block 2: alpha_read mean=0.008292 |da|mean=0.206559 max=0.980222 | inv_beta mean=1.011682 |di|mean=0.014846 max=0.041282
+  [r1c trace step 800] block 3: alpha_read mean=0.008804 |da|mean=0.205909 max=0.982480 | inv_beta mean=1.008961 |di|mean=0.012758 max=0.050448
+  [r1c trace step 800] block 4: alpha_read mean=0.010723 |da|mean=0.203765 max=0.974512 | inv_beta mean=1.009945 |di|mean=0.014200 max=0.071435
+  [r1c trace step 850] block 0: alpha_read mean=0.007455 |da|mean=0.207138 max=1.021816 | inv_beta mean=1.035830 |di|mean=0.037806 max=0.080517
+  [r1c trace step 850] block 1: alpha_read mean=0.008130 |da|mean=0.206662 max=0.997233 | inv_beta mean=1.017450 |di|mean=0.020075 max=0.050723
+  [r1c trace step 850] block 2: alpha_read mean=0.008336 |da|mean=0.206523 max=0.980212 | inv_beta mean=1.011605 |di|mean=0.014818 max=0.041027
+  [r1c trace step 850] block 3: alpha_read mean=0.008865 |da|mean=0.205856 max=0.982472 | inv_beta mean=1.008912 |di|mean=0.012769 max=0.050179
+  [r1c trace step 850] block 4: alpha_read mean=0.010794 |da|mean=0.203695 max=0.974502 | inv_beta mean=1.009872 |di|mean=0.014224 max=0.075960
+  [r1c trace step 900] block 0: alpha_read mean=0.007564 |da|mean=0.207030 max=1.021857 | inv_beta mean=1.035818 |di|mean=0.037833 max=0.080559
+  [r1c trace step 900] block 1: alpha_read mean=0.008200 |da|mean=0.206601 max=0.997204 | inv_beta mean=1.017353 |di|mean=0.020018 max=0.050778
+  [r1c trace step 900] block 2: alpha_read mean=0.008398 |da|mean=0.206471 max=0.980197 | inv_beta mean=1.011504 |di|mean=0.014774 max=0.041003
+  [r1c trace step 900] block 3: alpha_read mean=0.008926 |da|mean=0.205806 max=0.982460 | inv_beta mean=1.008821 |di|mean=0.012731 max=0.050032
+  [r1c trace step 900] block 4: alpha_read mean=0.010869 |da|mean=0.203624 max=0.974489 | inv_beta mean=1.009800 |di|mean=0.014245 max=0.077995
+  [r1c trace step 950] block 0: alpha_read mean=0.007663 |da|mean=0.206939 max=1.022038 | inv_beta mean=1.035808 |di|mean=0.037862 max=0.080807
+  [r1c trace step 950] block 1: alpha_read mean=0.008309 |da|mean=0.206499 max=0.997288 | inv_beta mean=1.017248 |di|mean=0.019970 max=0.050857
+  [r1c trace step 950] block 2: alpha_read mean=0.008464 |da|mean=0.206410 max=0.980025 | inv_beta mean=1.011398 |di|mean=0.014729 max=0.041198
+  [r1c trace step 950] block 3: alpha_read mean=0.008915 |da|mean=0.205825 max=0.982415 | inv_beta mean=1.008718 |di|mean=0.012683 max=0.050437
+  [r1c trace step 950] block 4: alpha_read mean=0.010884 |da|mean=0.203611 max=0.974454 | inv_beta mean=1.009784 |di|mean=0.014252 max=0.074471
+  [trace step 1000] block 0: fast=178 medium=201 slow=133 | mean_alpha=0.2146 | mean_|grad|=0.000005 (n=250)
+  [trace step 1000] block 1: fast=179 medium=199 slow=134 | mean_alpha=0.2147 | mean_|grad|=0.000005 (n=250)
+  [trace step 1000] block 2: fast=180 medium=198 slow=134 | mean_alpha=0.2147 | mean_|grad|=0.000005 (n=250)
+  [trace step 1000] block 3: fast=179 medium=200 slow=133 | mean_alpha=0.2147 | mean_|grad|=0.000004 (n=250)
+  [trace step 1000] block 4: fast=180 medium=198 slow=134 | mean_alpha=0.2145 | mean_|grad|=0.000015 (n=250)
+  [r1c trace step 1000] block 0: alpha_read mean=0.007664 |da|mean=0.206973 max=1.022083 | inv_beta mean=1.036092 |di|mean=0.038157 max=0.081632
+  [r1c trace step 1000] block 1: alpha_read mean=0.008519 |da|mean=0.206317 max=0.997650 | inv_beta mean=1.017353 |di|mean=0.020129 max=0.050376
+  [r1c trace step 1000] block 2: alpha_read mean=0.008642 |da|mean=0.206241 max=0.978889 | inv_beta mean=1.011480 |di|mean=0.014865 max=0.042694
+  [r1c trace step 1000] block 3: alpha_read mean=0.009028 |da|mean=0.205724 max=0.982461 | inv_beta mean=1.008802 |di|mean=0.012818 max=0.052080
+  [r1c trace step 1000] block 4: alpha_read mean=0.010921 |da|mean=0.203566 max=0.974298 | inv_beta mean=1.010046 |di|mean=0.014486 max=0.069137
+step 1000/1800 | epoch 2 | loss 2.7833 | 1.5 steps/s
+  [r1c trace step 1050] block 0: alpha_read mean=0.007719 |da|mean=0.206948 max=1.022177 | inv_beta mean=1.036187 |di|mean=0.038285 max=0.082451
+  [r1c trace step 1050] block 1: alpha_read mean=0.008584 |da|mean=0.206269 max=0.997662 | inv_beta mean=1.017390 |di|mean=0.020232 max=0.050362
+  [r1c trace step 1050] block 2: alpha_read mean=0.008746 |da|mean=0.206162 max=0.978536 | inv_beta mean=1.011499 |di|mean=0.014941 max=0.042801
+  [r1c trace step 1050] block 3: alpha_read mean=0.009102 |da|mean=0.205656 max=0.982446 | inv_beta mean=1.008792 |di|mean=0.012893 max=0.053467
+  [r1c trace step 1050] block 4: alpha_read mean=0.010960 |da|mean=0.203515 max=0.974111 | inv_beta mean=1.010087 |di|mean=0.014548 max=0.067221
+  [r1c trace step 1100] block 0: alpha_read mean=0.007844 |da|mean=0.206853 max=1.022514 | inv_beta mean=1.036250 |di|mean=0.038386 max=0.082438
+  [r1c trace step 1100] block 1: alpha_read mean=0.008619 |da|mean=0.206267 max=0.997743 | inv_beta mean=1.017407 |di|mean=0.020294 max=0.051547
+  [r1c trace step 1100] block 2: alpha_read mean=0.008865 |da|mean=0.206066 max=0.978492 | inv_beta mean=1.011466 |di|mean=0.014983 max=0.042261
+  [r1c trace step 1100] block 3: alpha_read mean=0.009172 |da|mean=0.205601 max=0.982254 | inv_beta mean=1.008771 |di|mean=0.012958 max=0.052694
+  [r1c trace step 1100] block 4: alpha_read mean=0.011089 |da|mean=0.203388 max=0.973972 | inv_beta mean=1.009979 |di|mean=0.014516 max=0.067735
+  [r1c trace step 1150] block 0: alpha_read mean=0.007868 |da|mean=0.206866 max=1.023056 | inv_beta mean=1.036324 |di|mean=0.038491 max=0.082161
+  [r1c trace step 1150] block 1: alpha_read mean=0.008679 |da|mean=0.206209 max=0.998043 | inv_beta mean=1.017462 |di|mean=0.020411 max=0.052225
+  [r1c trace step 1150] block 2: alpha_read mean=0.008908 |da|mean=0.206047 max=0.978643 | inv_beta mean=1.011527 |di|mean=0.015133 max=0.042142
+  [r1c trace step 1150] block 3: alpha_read mean=0.009251 |da|mean=0.205523 max=0.981981 | inv_beta mean=1.008746 |di|mean=0.013003 max=0.052487
+  [r1c trace step 1150] block 4: alpha_read mean=0.011210 |da|mean=0.203271 max=0.973789 | inv_beta mean=1.009896 |di|mean=0.014504 max=0.067296
+  [r1c trace step 1200] block 0: alpha_read mean=0.007961 |da|mean=0.206802 max=1.023772 | inv_beta mean=1.036476 |di|mean=0.038681 max=0.081883
+  [r1c trace step 1200] block 1: alpha_read mean=0.008808 |da|mean=0.206072 max=0.998511 | inv_beta mean=1.017602 |di|mean=0.020597 max=0.054387
+  [r1c trace step 1200] block 2: alpha_read mean=0.009034 |da|mean=0.205940 max=0.978739 | inv_beta mean=1.011628 |di|mean=0.015308 max=0.043435
+  [r1c trace step 1200] block 3: alpha_read mean=0.009406 |da|mean=0.205349 max=0.981663 | inv_beta mean=1.008787 |di|mean=0.013156 max=0.053606
+  [r1c trace step 1200] block 4: alpha_read mean=0.011353 |da|mean=0.203113 max=0.973473 | inv_beta mean=1.009849 |di|mean=0.014545 max=0.066389
+  [trace step 1250] block 0: fast=178 medium=200 slow=134 | mean_alpha=0.2147 | mean_|grad|=0.000021 (n=250)
+  [trace step 1250] block 1: fast=179 medium=199 slow=134 | mean_alpha=0.2147 | mean_|grad|=0.000014 (n=250)
+  [trace step 1250] block 2: fast=180 medium=198 slow=134 | mean_alpha=0.2148 | mean_|grad|=0.000012 (n=250)
+  [trace step 1250] block 3: fast=179 medium=199 slow=134 | mean_alpha=0.2147 | mean_|grad|=0.000011 (n=250)
+  [trace step 1250] block 4: fast=180 medium=198 slow=134 | mean_alpha=0.2144 | mean_|grad|=0.000028 (n=250)
+  [r1c trace step 1250] block 0: alpha_read mean=0.008087 |da|mean=0.206703 max=1.024338 | inv_beta mean=1.036648 |di|mean=0.038888 max=0.082972
+  [r1c trace step 1250] block 1: alpha_read mean=0.008927 |da|mean=0.205972 max=0.998599 | inv_beta mean=1.017748 |di|mean=0.020817 max=0.053538
+  [r1c trace step 1250] block 2: alpha_read mean=0.009093 |da|mean=0.205879 max=0.978375 | inv_beta mean=1.011710 |di|mean=0.015460 max=0.044497
+  [r1c trace step 1250] block 3: alpha_read mean=0.009509 |da|mean=0.205259 max=0.981629 | inv_beta mean=1.008792 |di|mean=0.013267 max=0.053907
+  [r1c trace step 1250] block 4: alpha_read mean=0.011516 |da|mean=0.202940 max=0.973454 | inv_beta mean=1.009740 |di|mean=0.014566 max=0.071158
+step 1250/1800 | epoch 2 | loss 2.7685 | 1.5 steps/s
+  validation: loss 2.8092 | 4.053 bits/byte
+  [r1c trace step 1300] block 0: alpha_read mean=0.008439 |da|mean=0.206326 max=1.028714 | inv_beta mean=1.040932 |di|mean=0.043191 max=0.091141
+  [r1c trace step 1300] block 1: alpha_read mean=0.010444 |da|mean=0.204450 max=0.999203 | inv_beta mean=1.020055 |di|mean=0.023432 max=0.062815
+  [r1c trace step 1300] block 2: alpha_read mean=0.010486 |da|mean=0.204474 max=0.971083 | inv_beta mean=1.013553 |di|mean=0.017710 max=0.056955
+  [r1c trace step 1300] block 3: alpha_read mean=0.010175 |da|mean=0.204502 max=0.983134 | inv_beta mean=1.011078 |di|mean=0.015471 max=0.064948
+  [r1c trace step 1300] block 4: alpha_read mean=0.011736 |da|mean=0.202697 max=0.969627 | inv_beta mean=1.013127 |di|mean=0.017754 max=0.069872
+  [r1c trace step 1350] block 0: alpha_read mean=0.008715 |da|mean=0.206071 max=1.028577 | inv_beta mean=1.042221 |di|mean=0.044530 max=0.093994
+  [r1c trace step 1350] block 1: alpha_read mean=0.010804 |da|mean=0.204103 max=0.998519 | inv_beta mean=1.020787 |di|mean=0.024268 max=0.066429
+  [r1c trace step 1350] block 2: alpha_read mean=0.010899 |da|mean=0.204064 max=0.969832 | inv_beta mean=1.013928 |di|mean=0.018242 max=0.059323
+  [r1c trace step 1350] block 3: alpha_read mean=0.010680 |da|mean=0.203953 max=0.983553 | inv_beta mean=1.011497 |di|mean=0.016016 max=0.067749
+  [r1c trace step 1350] block 4: alpha_read mean=0.012397 |da|mean=0.202007 max=0.966750 | inv_beta mean=1.013717 |di|mean=0.018435 max=0.074460
+  [r1c trace step 1400] block 0: alpha_read mean=0.008738 |da|mean=0.206096 max=1.028452 | inv_beta mean=1.042434 |di|mean=0.044778 max=0.093794
+  [r1c trace step 1400] block 1: alpha_read mean=0.010899 |da|mean=0.204030 max=0.998201 | inv_beta mean=1.020872 |di|mean=0.024406 max=0.067843
+  [r1c trace step 1400] block 2: alpha_read mean=0.010984 |da|mean=0.203972 max=0.969669 | inv_beta mean=1.013907 |di|mean=0.018310 max=0.059990
+  [r1c trace step 1400] block 3: alpha_read mean=0.010790 |da|mean=0.203843 max=0.984062 | inv_beta mean=1.011494 |di|mean=0.016084 max=0.067706
+  [r1c trace step 1400] block 4: alpha_read mean=0.012593 |da|mean=0.201785 max=0.966824 | inv_beta mean=1.013681 |di|mean=0.018467 max=0.072023
+  [r1c trace step 1450] block 0: alpha_read mean=0.008749 |da|mean=0.206113 max=1.028594 | inv_beta mean=1.042565 |di|mean=0.044930 max=0.093712
+  [r1c trace step 1450] block 1: alpha_read mean=0.010981 |da|mean=0.203965 max=0.998247 | inv_beta mean=1.020875 |di|mean=0.024477 max=0.068684
+  [r1c trace step 1450] block 2: alpha_read mean=0.011061 |da|mean=0.203896 max=0.969449 | inv_beta mean=1.013871 |di|mean=0.018361 max=0.060456
+  [r1c trace step 1450] block 3: alpha_read mean=0.010889 |da|mean=0.203752 max=0.983792 | inv_beta mean=1.011475 |di|mean=0.016151 max=0.068152
+  [r1c trace step 1450] block 4: alpha_read mean=0.012719 |da|mean=0.201661 max=0.966735 | inv_beta mean=1.013584 |di|mean=0.018423 max=0.073041
+  [trace step 1500] block 0: fast=178 medium=200 slow=134 | mean_alpha=0.2147 | mean_|grad|=0.000036 (n=250)
+  [trace step 1500] block 1: fast=179 medium=199 slow=134 | mean_alpha=0.2146 | mean_|grad|=0.000032 (n=250)
+  [trace step 1500] block 2: fast=180 medium=199 slow=133 | mean_alpha=0.2146 | mean_|grad|=0.000031 (n=250)
+  [trace step 1500] block 3: fast=177 medium=201 slow=134 | mean_alpha=0.2145 | mean_|grad|=0.000017 (n=250)
+  [trace step 1500] block 4: fast=180 medium=198 slow=134 | mean_alpha=0.2143 | mean_|grad|=0.000037 (n=250)
+  [r1c trace step 1500] block 0: alpha_read mean=0.008770 |da|mean=0.206107 max=1.028633 | inv_beta mean=1.042594 |di|mean=0.044981 max=0.095064
+  [r1c trace step 1500] block 1: alpha_read mean=0.011002 |da|mean=0.203981 max=0.998152 | inv_beta mean=1.020836 |di|mean=0.024498 max=0.069407
+  [r1c trace step 1500] block 2: alpha_read mean=0.011119 |da|mean=0.203841 max=0.969326 | inv_beta mean=1.013819 |di|mean=0.018375 max=0.060919
+  [r1c trace step 1500] block 3: alpha_read mean=0.010996 |da|mean=0.203648 max=0.983998 | inv_beta mean=1.011430 |di|mean=0.016166 max=0.067909
+  [r1c trace step 1500] block 4: alpha_read mean=0.012902 |da|mean=0.201483 max=0.966759 | inv_beta mean=1.013463 |di|mean=0.018377 max=0.074167
+step 1500/1800 | epoch 2 | loss 2.7809 | 1.4 steps/s
+  [r1c trace step 1550] block 0: alpha_read mean=0.008773 |da|mean=0.206130 max=1.028710 | inv_beta mean=1.042741 |di|mean=0.045147 max=0.094961
+  [r1c trace step 1550] block 1: alpha_read mean=0.011038 |da|mean=0.203969 max=0.998245 | inv_beta mean=1.020837 |di|mean=0.024568 max=0.070074
+  [r1c trace step 1550] block 2: alpha_read mean=0.011160 |da|mean=0.203812 max=0.968231 | inv_beta mean=1.013789 |di|mean=0.018415 max=0.060986
+  [r1c trace step 1550] block 3: alpha_read mean=0.011042 |da|mean=0.203598 max=0.983694 | inv_beta mean=1.011412 |di|mean=0.016203 max=0.067526
+  [r1c trace step 1550] block 4: alpha_read mean=0.012981 |da|mean=0.201405 max=0.966717 | inv_beta mean=1.013434 |di|mean=0.018401 max=0.074249
+  [r1c trace step 1600] block 0: alpha_read mean=0.008802 |da|mean=0.206126 max=1.028561 | inv_beta mean=1.042748 |di|mean=0.045181 max=0.095016
+  [r1c trace step 1600] block 1: alpha_read mean=0.011084 |da|mean=0.203943 max=0.998153 | inv_beta mean=1.020790 |di|mean=0.024590 max=0.070812
+  [r1c trace step 1600] block 2: alpha_read mean=0.011196 |da|mean=0.203796 max=0.967664 | inv_beta mean=1.013746 |di|mean=0.018419 max=0.060786
+  [r1c trace step 1600] block 3: alpha_read mean=0.011143 |da|mean=0.203509 max=0.983912 | inv_beta mean=1.011329 |di|mean=0.016202 max=0.067355
+  [r1c trace step 1600] block 4: alpha_read mean=0.013015 |da|mean=0.201365 max=0.966740 | inv_beta mean=1.013393 |di|mean=0.018416 max=0.074237
+  [r1c trace step 1650] block 0: alpha_read mean=0.008933 |da|mean=0.206018 max=1.028657 | inv_beta mean=1.042726 |di|mean=0.045193 max=0.095013
+  [r1c trace step 1650] block 1: alpha_read mean=0.011121 |da|mean=0.203904 max=0.998109 | inv_beta mean=1.020766 |di|mean=0.024607 max=0.071167
+  [r1c trace step 1650] block 2: alpha_read mean=0.011291 |da|mean=0.203708 max=0.967635 | inv_beta mean=1.013662 |di|mean=0.018413 max=0.060683
+  [r1c trace step 1650] block 3: alpha_read mean=0.011282 |da|mean=0.203367 max=0.984071 | inv_beta mean=1.011263 |di|mean=0.016244 max=0.068169
+  [r1c trace step 1650] block 4: alpha_read mean=0.013141 |da|mean=0.201247 max=0.966759 | inv_beta mean=1.013303 |di|mean=0.018390 max=0.073535
+  [r1c trace step 1700] block 0: alpha_read mean=0.008903 |da|mean=0.206079 max=1.028861 | inv_beta mean=1.042751 |di|mean=0.045243 max=0.096332
+  [r1c trace step 1700] block 1: alpha_read mean=0.011116 |da|mean=0.203920 max=0.998091 | inv_beta mean=1.020740 |di|mean=0.024648 max=0.070736
+  [r1c trace step 1700] block 2: alpha_read mean=0.011375 |da|mean=0.203628 max=0.967595 | inv_beta mean=1.013555 |di|mean=0.018374 max=0.060379
+  [r1c trace step 1700] block 3: alpha_read mean=0.011340 |da|mean=0.203312 max=0.984072 | inv_beta mean=1.011206 |di|mean=0.016274 max=0.068134
+  [r1c trace step 1700] block 4: alpha_read mean=0.013257 |da|mean=0.201133 max=0.966769 | inv_beta mean=1.013143 |di|mean=0.018320 max=0.076003
+  [trace step 1750] block 0: fast=178 medium=200 slow=134 | mean_alpha=0.2147 | mean_|grad|=0.000018 (n=250)
+  [trace step 1750] block 1: fast=179 medium=200 slow=133 | mean_alpha=0.2146 | mean_|grad|=0.000013 (n=250)
+  [trace step 1750] block 2: fast=179 medium=199 slow=134 | mean_alpha=0.2146 | mean_|grad|=0.000010 (n=250)
+  [trace step 1750] block 3: fast=177 medium=202 slow=133 | mean_alpha=0.2145 | mean_|grad|=0.000009 (n=250)
+  [trace step 1750] block 4: fast=179 medium=199 slow=134 | mean_alpha=0.2143 | mean_|grad|=0.000023 (n=250)
+  [r1c trace step 1750] block 0: alpha_read mean=0.008924 |da|mean=0.206087 max=1.028849 | inv_beta mean=1.042745 |di|mean=0.045266 max=0.097991
+  [r1c trace step 1750] block 1: alpha_read mean=0.011175 |da|mean=0.203882 max=0.998023 | inv_beta mean=1.020695 |di|mean=0.024669 max=0.072761
+  [r1c trace step 1750] block 2: alpha_read mean=0.011419 |da|mean=0.203588 max=0.967493 | inv_beta mean=1.013467 |di|mean=0.018370 max=0.060455
+  [r1c trace step 1750] block 3: alpha_read mean=0.011386 |da|mean=0.203256 max=0.984280 | inv_beta mean=1.011156 |di|mean=0.016320 max=0.067684
+  [r1c trace step 1750] block 4: alpha_read mean=0.013325 |da|mean=0.201074 max=0.966849 | inv_beta mean=1.013038 |di|mean=0.018298 max=0.075756
+step 1750/1800 | epoch 2 | loss 2.7745 | 1.5 steps/s
+  [r1c trace step 1800] block 0: alpha_read mean=0.008989 |da|mean=0.206039 max=1.028934 | inv_beta mean=1.042703 |di|mean=0.045268 max=0.097926
+  [r1c trace step 1800] block 1: alpha_read mean=0.011207 |da|mean=0.203870 max=0.997998 | inv_beta mean=1.020621 |di|mean=0.024661 max=0.072806
+  [r1c trace step 1800] block 2: alpha_read mean=0.011452 |da|mean=0.203581 max=0.967522 | inv_beta mean=1.013370 |di|mean=0.018336 max=0.060984
+  [r1c trace step 1800] block 3: alpha_read mean=0.011461 |da|mean=0.203189 max=0.984292 | inv_beta mean=1.011067 |di|mean=0.016315 max=0.067359
+  [r1c trace step 1800] block 4: alpha_read mean=0.013405 |da|mean=0.201005 max=0.966797 | inv_beta mean=1.012915 |di|mean=0.018267 max=0.075719
+eva: process memory peak 455.3 MB
+
+-- what holds the training memory --
+  parameters                51.2 MB   (unavoidable)
+  AdamW state              102.3 MB   (unavoidable today)
+  GRAPH, own peak           10.0 MB
+  live nodes, peak           119
+  graph alive now            0.0 MB   (0 if everything was freed)
+  GRADIENT MAP              51.2 MB   <- a new Vec per tensor, every step
+
+-- who holds, accumulated over the whole training run --
+  clockmem_inject_learn    9518.8 MB in    9500 nodes     50%
+  sigmoid             9518.6 MB in   19000 nodes     50%
+  gather                 7.5 MB in    1900 nodes      0%
+  ce                     7.4 MB in    1900 nodes      0%
+  add                    2.8 MB in   66500 nodes      0%
+  matmul                 1.6 MB in   68400 nodes      0%
+  rms_norm               0.6 MB in   30400 nodes      0%
+  mul                    0.4 MB in    9500 nodes      0%
+  parameter copies from a shared Arc: 0  (has to be 0)
+eva: FINAL VALIDATION loss 2.7969 | 4.035 bits/byte (100 windows, arch clock)
+eva: rule 'all' | 1800 forward, 1800 backward (100% learned)
+eva: training finished in 1217.1s, weights in 16m5b_N256_T1_win257_r1c_neutral.weights

@@ -1,0 +1,110 @@
+eva: dataset 11520000 bytes, 22499 windows, 13405701 params
+eva: 20249 windows to train on, 2250 to validate
+[eva] matmul on GPU: NVIDIA GeForce GTX 1650
+step 500/80996 | epoch 1 | loss 4.8801 | 1.7 steps/s
+step 1000/80996 | epoch 1 | loss 4.7117 | 1.7 steps/s
+step 1500/80996 | epoch 1 | loss 4.6958 | 1.7 steps/s
+step 2000/80996 | epoch 1 | loss 4.6853 | 1.7 steps/s
+step 2500/80996 | epoch 1 | loss 4.6659 | 1.7 steps/s
+  validation: loss 4.6521 | 6.712 bits/byte
+step 3000/80996 | epoch 1 | loss 4.6425 | 0.7 steps/s
+step 3500/80996 | epoch 1 | loss 4.6244 | 1.7 steps/s
+step 4000/80996 | epoch 1 | loss 4.6094 | 1.7 steps/s
+step 4500/80996 | epoch 1 | loss 4.5993 | 1.7 steps/s
+step 5000/80996 | epoch 1 | loss 4.5919 | 1.7 steps/s
+  validation: loss 4.5826 | 6.611 bits/byte
+sample: "+�\u{4})\u{7f}\u{3}+h����\u{5} ���\u{6}=h\u{1}?g\u{2}%�\u{1}?a\u{5}&��\u{1} �kF\u{5}?�\u{7f}?�\u{6}!�\u{7}%[\u{2}7�?�?J\u{7}?L\u{6}"
+step 5500/80996 | epoch 1 | loss 4.5792 | 0.7 steps/s
+step 6000/80996 | epoch 1 | loss 4.5717 | 1.0 steps/s
+step 6500/80996 | epoch 1 | loss 4.5632 | 1.0 steps/s
+step 7000/80996 | epoch 1 | loss 4.5550 | 1.1 steps/s
+step 7500/80996 | epoch 1 | loss 4.5481 | 1.7 steps/s
+  validation: loss 4.5449 | 6.557 bits/byte
+step 8000/80996 | epoch 1 | loss 4.5410 | 0.7 steps/s
+step 8500/80996 | epoch 1 | loss 4.5360 | 1.7 steps/s
+step 9000/80996 | epoch 1 | loss 4.5299 | 1.7 steps/s
+step 9500/80996 | epoch 1 | loss 4.5255 | 1.7 steps/s
+step 10000/80996 | epoch 1 | loss 4.5211 | 1.7 steps/s
+  validation: loss 4.5149 | 6.514 bits/byte
+sample: "*��\u{3}4�\u{6}&��\u{6}*�u4z\u{1}&N\u{4}/w]\u{3}4��-�\u{5}*@\u{3}4�${�\u{2}-�\u{2}-z\u{3}-{{\u{6}*�\u{3}-�\u{3}/R\u{7}-�\u{1}"
+step 10500/80996 | epoch 1 | loss 4.5135 | 0.7 steps/s
+step 11000/80996 | epoch 1 | loss 4.5094 | 1.7 steps/s
+step 11500/80996 | epoch 1 | loss 4.5067 | 1.7 steps/s
+step 12000/80996 | epoch 1 | loss 4.5026 | 1.7 steps/s
+step 12500/80996 | epoch 1 | loss 4.4958 | 1.7 steps/s
+  validation: loss 4.4986 | 6.490 bits/byte
+step 13000/80996 | epoch 1 | loss 4.4943 | 0.7 steps/s
+step 13500/80996 | epoch 1 | loss 4.4905 | 1.7 steps/s
+step 14000/80996 | epoch 1 | loss 4.4859 | 1.7 steps/s
+step 14500/80996 | epoch 1 | loss 4.4848 | 1.7 steps/s
+step 15000/80996 | epoch 1 | loss 4.4845 | 1.7 steps/s
+  validation: loss 4.4798 | 6.463 bits/byte
+sample: "+F\u{3}:AH�\u{1}=SA\u{3}&B\u{3}:S\u{5}7m\u{6}!�Z�\u{4}1c\u{4}:��\u{3}:A\u{1}+A\u{5}:��\u{4}:�\u{7}>��\u{4}:�\u{4}1�\u{1}&�Z\u{5}+��\u{1}"
+step 15500/80996 | epoch 1 | loss 4.4806 | 0.7 steps/s
+step 16000/80996 | epoch 1 | loss 4.4783 | 1.7 steps/s
+step 16500/80996 | epoch 1 | loss 4.4696 | 1.7 steps/s
+step 17000/80996 | epoch 1 | loss 4.4743 | 1.7 steps/s
+step 17500/80996 | epoch 1 | loss 4.4684 | 1.7 steps/s
+  validation: loss 4.4674 | 6.445 bits/byte
+step 18000/80996 | epoch 1 | loss 4.4694 | 0.7 steps/s
+step 18500/80996 | epoch 1 | loss 4.4642 | 1.7 steps/s
+step 19000/80996 | epoch 1 | loss 4.4651 | 1.7 steps/s
+step 19500/80996 | epoch 1 | loss 4.4633 | 1.7 steps/s
+step 20000/80996 | epoch 1 | loss 4.4619 | 1.7 steps/s
+  validation: loss 4.4559 | 6.428 bits/byte
+sample: "+��\u{7}%��\u{2}=�\u{4}1��j\u{7}+�\u{5}1�\u{6}+�\u{7}+ĥ\u{1}%�\u{1}/R\u{4}=�\u{7}%�\u{7}%�+�\u{3}=�\u{3}=K�\u{4} �\u{1})�\u{6}%��\u{2}"
+step 20500/80996 | epoch 2 | loss 4.4535 | 0.7 steps/s
+step 21000/80996 | epoch 2 | loss 4.4526 | 1.7 steps/s
+step 21500/80996 | epoch 2 | loss 4.4497 | 1.7 steps/s
+step 22000/80996 | epoch 2 | loss 4.4500 | 1.7 steps/s
+step 22500/80996 | epoch 2 | loss 4.4481 | 1.7 steps/s
+  validation: loss 4.4474 | 6.416 bits/byte
+step 23000/80996 | epoch 2 | loss 4.4425 | 0.7 steps/s
+step 23500/80996 | epoch 2 | loss 4.4421 | 1.7 steps/s
+step 24000/80996 | epoch 2 | loss 4.4401 | 1.7 steps/s
+step 24500/80996 | epoch 2 | loss 4.4391 | 1.7 steps/s
+step 25000/80996 | epoch 2 | loss 4.4428 | 1.7 steps/s
+  validation: loss 4.4413 | 6.407 bits/byte
+sample: "7��\u{6})�}�\u{4}1�\u{7} �\u{1}+�\u{2}1�\\\u{4} �\u{6}+g\u{1}+��\u{3} �\u{7}7r�\u{7}7r\u{5}*g\u{3}7�\u{7}1�\u{1} �_\u{6} �\u{7}+E\u{7}*�"
+step 25500/80996 | epoch 2 | loss 4.4389 | 0.7 steps/s
+step 26000/80996 | epoch 2 | loss 4.4420 | 1.7 steps/s
+step 26500/80996 | epoch 2 | loss 4.4393 | 1.7 steps/s
+step 27000/80996 | epoch 2 | loss 4.4374 | 1.7 steps/s
+step 27500/80996 | epoch 2 | loss 4.4341 | 1.7 steps/s
+  validation: loss 4.4354 | 6.399 bits/byte
+step 28000/80996 | epoch 2 | loss 4.4336 | 0.7 steps/s
+step 28500/80996 | epoch 2 | loss 4.4315 | 1.7 steps/s
+step 29000/80996 | epoch 2 | loss 4.4335 | 1.7 steps/s
+step 29500/80996 | epoch 2 | loss 4.4316 | 1.7 steps/s
+step 30000/80996 | epoch 2 | loss 4.4274 | 1.7 steps/s
+  validation: loss 4.4314 | 6.393 bits/byte
+sample: "*�\u{3}-�\u{6}*�x+R\u{1}*�\u{6}1�\u{5}+�\u{6}*�Q�\u{4}+�\u{6}*�\u{1}*R*r�\u{1}?sM?�\u{6}?�ʂ�s\u{6}+�\u{4}+t\u{7}+W\u{1}+"
+step 30500/80996 | epoch 2 | loss 4.4297 | 0.7 steps/s
+step 31000/80996 | epoch 2 | loss 4.4278 | 1.7 steps/s
+step 31500/80996 | epoch 2 | loss 4.4277 | 1.7 steps/s
+step 32000/80996 | epoch 2 | loss 4.4264 | 1.0 steps/s
+step 32500/80996 | epoch 2 | loss 4.4267 | 1.6 steps/s
+  validation: loss 4.4249 | 6.384 bits/byte
+step 33000/80996 | epoch 2 | loss 4.4243 | 0.7 steps/s
+step 33500/80996 | epoch 2 | loss 4.4220 | 1.7 steps/s
+step 34000/80996 | epoch 2 | loss 4.4260 | 1.7 steps/s
+step 34500/80996 | epoch 2 | loss 4.4215 | 1.7 steps/s
+step 35000/80996 | epoch 2 | loss 4.4199 | 1.7 steps/s
+  validation: loss 4.4209 | 6.378 bits/byte
+sample: "6�\u{5}2r�)��\u{7})w�\u{3}2Z\u{7}=�W\u{7};XI\u{3}>�w\u{2}>�7��\u{3}'b\u{7})�\u{5}>�\u{3}=�\u{2}>�I\u{1})U\u{3}>�7���\u{3}"
+step 35500/80996 | epoch 2 | loss 4.4170 | 0.7 steps/s
+step 36000/80996 | epoch 2 | loss 4.4177 | 1.7 steps/s
+step 36500/80996 | epoch 2 | loss 4.4193 | 1.7 steps/s
+step 37000/80996 | epoch 2 | loss 4.4150 | 1.7 steps/s
+step 37500/80996 | epoch 2 | loss 4.4137 | 1.7 steps/s
+  validation: loss 4.4174 | 6.373 bits/byte
+step 38000/80996 | epoch 2 | loss 4.4146 | 0.7 steps/s
+step 38500/80996 | epoch 2 | loss 4.4152 | 1.7 steps/s
+step 39000/80996 | epoch 2 | loss 4.4159 | 1.7 steps/s
+step 39500/80996 | epoch 2 | loss 4.4129 | 1.7 steps/s
+step 40000/80996 | epoch 2 | loss 4.4127 | 1.7 steps/s
+  validation: loss 4.4105 | 6.363 bits/byte
+sample: "5�\u{4}#���\u{7}5�m\u{1})�\u{7})�\u{4}-k�^\u{4}-�\u{7})��5�\u{1}+�\u{1}1}\u{1}5�\u{3}#k\u{1}1�5H\u{4}+`)`�1�\u{3}-o"
+step 40500/80996 | epoch 3 | loss 4.4122 | 0.7 steps/s
+step 41000/80996 | epoch 3 | loss 4.4037 | 1.2 steps/s
+step 41500/80996 | epoch 3 | loss 4.4009 | 1.5 steps/s

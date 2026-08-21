@@ -1,0 +1,15 @@
+eva mask_eval: 16m5b_N128_T1_win129.weights | data/sintetico_N128_seq512_win1000_seed4244.dat | N=128 seq=512
+  windows: 900 train, 100 val (contiguous cut)
+  recurrent region per window: targets [127, 510] -> 384 positions
+  floor: 0 bits/byte with perfect memory, 8.000 with none
+
+[eva] matmul on GPU: NVIDIA GeForce GTX 1650
+=== VALIDATION (unseen text) ===
+  full bpb (everything)           8.0056   (contaminated by seeds)
+  RECURRENT bpb (t>=N, masked)     8.0018   <-- THE NUMBER
+  seed bpb (t<N, real floor)       8.0172   (has to be ~8: unpredictable)
+
+=== TRAINING (reference, memorization) ===
+  full bpb                7.9854
+  recurrent bpb            8.0008
+  seed bpb                 7.9388

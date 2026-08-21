@@ -1,0 +1,25 @@
+eva eval_associative: 16m5b_assoc_k2_dense_attn.weights | data/assoc_k2_dense_seq512_win1500_seed42.dat | seq=512
+  windows: 1349 train, 150 val (contiguous cut)
+
+=== VAL (unseen text) ===
+  bucket               n    acc%      bpb
+  gap<=32          14878   99.85   0.0066
+  32<gap<=128        239  100.00   0.0021
+  128<gap<=256         0    0.00   0.0000
+  256<gap<=512         0    0.00   0.0000
+  gap>512              0    0.00   0.0000
+  binding (cold)     300    2.67   5.0702   <- unpredictable by construction (first occurrence)
+  filler           61383   12.55   6.5372   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+
+=== TRAIN (memorization reference) ===
+  bucket               n    acc%      bpb
+  gap<=32         133828   99.87   0.0051
+  32<gap<=128       2256   99.87   0.0042
+  128<gap<=256         0    0.00   0.0000
+  256<gap<=512         0    0.00   0.0000
+  gap>512              0    0.00   0.0000
+  binding (cold)    2698    3.89   5.0446   <- unpredictable by construction (first occurrence)
+  filler          551906   12.91   6.5267   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+

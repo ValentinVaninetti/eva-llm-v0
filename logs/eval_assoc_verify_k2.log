@@ -1,0 +1,53 @@
+### CLOCK k2 SMALL (300 win)
+eva eval_associative: 16m5b_assoc_k2_clock.weights | data/assoc_k2_seq512_win300_seed42.dat | seq=512
+  windows: 269 train, 30 val (contiguous cut)
+
+=== VAL (unseen text) ===
+  bucket               n    acc%      bpb
+  gap<=32            256    7.42   5.2351
+  32<gap<=128        341    4.69   5.4067
+  128<gap<=256        14    0.00   5.4504
+  256<gap<=512         0    0.00   0.0000
+  gap>512              0    0.00   0.0000
+  binding (cold)      60    3.33   5.4050   <- unpredictable by construction (first occurrence)
+  filler           14689    0.63  11.9319   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+
+=== TRAIN (memorization reference) ===
+  bucket               n    acc%      bpb
+  gap<=32           2321   29.81   3.8100
+  32<gap<=128       2838   24.31   3.9810
+  128<gap<=256       160   23.12   4.1132
+  256<gap<=512         3    0.00   4.1567
+  gap>512              0    0.00   0.0000
+  binding (cold)     538   16.36   4.3728   <- unpredictable by construction (first occurrence)
+  filler          131868   99.83   0.0136   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+
+
+### CLOCK k2 BIG (1500 win)
+eva eval_associative: 16m5b_assoc_k2_big_clock.weights | data/assoc_k2_seq512_win1500_seed42.dat | seq=512
+  windows: 1349 train, 150 val (contiguous cut)
+
+=== VAL (unseen text) ===
+  bucket               n    acc%      bpb
+  gap<=32           1320    6.29   4.4514
+  32<gap<=128       1575    4.76   4.7491
+  128<gap<=256        95    2.11   5.0725
+  256<gap<=512         2    0.00   5.5998
+  gap>512              0    0.00   0.0000
+  binding (cold)     300    3.33   5.3062   <- unpredictable by construction (first occurrence)
+  filler           73508    2.27   7.5515   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+
+=== TRAIN (memorization reference) ===
+  bucket               n    acc%      bpb
+  gap<=32          11536    8.68   4.4242
+  32<gap<=128      14463    7.02   4.6403
+  128<gap<=256       789    5.32   4.9735
+  256<gap<=512        16    6.25   5.3955
+  gap>512              0    0.00   0.0000
+  binding (cold)    2698    3.63   5.0959   <- unpredictable by construction (first occurrence)
+  filler          661186    3.41   7.4045   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+

@@ -1,0 +1,37 @@
+eva state_probe: 16m5b_N256_T1.weights | data/sintetico_N256_seq512_win1000_seed4245.dat | N=256 seq=512 blocks=5 dim=512
+  probe region per window: targets [256, 512-1) -> 256 positions (label = target[t-N])
+  fit on first 120 train windows (stats on first 30), eval on 100 val windows
+  state: fresh per window (mask_eval convention); squash temp=1 antisat=false
+
+[eva] matmul on GPU: NVIDIA GeForce GTX 1650
+  stats: window 0/30
+  stats: window 10/30
+  stats: window 20/30
+  fit: window 0/120
+  fit: window 100/120
+samples (fit): A 30600 per block | B 30600 per block
+
+  val: window 900/1000
+  val: window 920/1000
+  val: window 940/1000
+  val: window 960/1000
+  val: window 980/1000
+samples (val): 25500
+
+=== PROBE A: cur[t] -> input[t-N+1]  (single-state linear read) ===
+  block 0: lam= 0.01  VAL bpb=8.0001  acc=0.353%
+  block 1: lam= 0.01  VAL bpb=8.0000  acc=0.420%
+  block 2: lam= 0.01  VAL bpb=8.0001  acc=0.337%
+  block 3: lam=   10  VAL bpb=8.0001  acc=0.318%
+  block 4: lam= 0.01  VAL bpb=8.0001  acc=0.424%
+
+=== PROBE B: w[t-N+1] finite-difference read (window K>=N+1) ===
+  block 0: lam= 0.01  VAL bpb=7.8535  acc=81.612%
+  block 1: lam= 0.01  VAL bpb=7.9439  acc=40.047%
+  block 2: lam= 0.01  VAL bpb=7.9503  acc=34.427%
+  block 3: lam= 0.01  VAL bpb=7.9371  acc=59.478%
+  block 4: lam= 0.01  VAL bpb=7.9404  acc=72.216%
+
+(chance floor: 8.0000 bpb, 0.39% acc; best block matters, not the mean)
+
+N256_EXIT=0

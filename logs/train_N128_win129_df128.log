@@ -1,0 +1,71 @@
+eva: EVA_READ_LR=10: readout lr scaled on 5 wread params
+eva: dataset 512001 bytes, 1000 windows, 13735941 params
+eva: 900 windows to train on, 100 to validate
+eva: alpha/gradient TRACE ACTIVE (EVA_ALPHA_TRACE)
+[eva] matmul on GPU: NVIDIA GeForce GTX 1650
+  [trace step 250] block 0: fast=178 medium=200 slow=134 | mean_alpha=0.2156 | mean_|grad|=0.000025 (n=250)
+  [trace step 250] block 1: fast=179 medium=198 slow=135 | mean_alpha=0.2156 | mean_|grad|=0.000024 (n=250)
+  [trace step 250] block 2: fast=179 medium=199 slow=134 | mean_alpha=0.2156 | mean_|grad|=0.000019 (n=250)
+  [trace step 250] block 3: fast=179 medium=199 slow=134 | mean_alpha=0.2157 | mean_|grad|=0.000017 (n=250)
+  [trace step 250] block 4: fast=178 medium=200 slow=134 | mean_alpha=0.2157 | mean_|grad|=0.000035 (n=250)
+step 250/1800 | epoch 1 | loss 5.5985 | 1.4 steps/s
+  [trace step 500] block 0: fast=178 medium=199 slow=135 | mean_alpha=0.2157 | mean_|grad|=0.000011 (n=250)
+  [trace step 500] block 1: fast=179 medium=199 slow=134 | mean_alpha=0.2157 | mean_|grad|=0.000012 (n=250)
+  [trace step 500] block 2: fast=179 medium=199 slow=134 | mean_alpha=0.2157 | mean_|grad|=0.000007 (n=250)
+  [trace step 500] block 3: fast=179 medium=199 slow=134 | mean_alpha=0.2158 | mean_|grad|=0.000008 (n=250)
+  [trace step 500] block 4: fast=178 medium=200 slow=134 | mean_alpha=0.2158 | mean_|grad|=0.000024 (n=250)
+step 500/1800 | epoch 1 | loss 5.5541 | 1.5 steps/s
+  [trace step 750] block 0: fast=178 medium=200 slow=134 | mean_alpha=0.2157 | mean_|grad|=0.000005 (n=250)
+  [trace step 750] block 1: fast=179 medium=198 slow=135 | mean_alpha=0.2158 | mean_|grad|=0.000007 (n=250)
+  [trace step 750] block 2: fast=179 medium=199 slow=134 | mean_alpha=0.2158 | mean_|grad|=0.000005 (n=250)
+  [trace step 750] block 3: fast=179 medium=199 slow=134 | mean_alpha=0.2158 | mean_|grad|=0.000005 (n=250)
+  [trace step 750] block 4: fast=178 medium=200 slow=134 | mean_alpha=0.2158 | mean_|grad|=0.000015 (n=250)
+step 750/1800 | epoch 1 | loss 5.5494 | 1.5 steps/s
+  [trace step 1000] block 0: fast=177 medium=201 slow=134 | mean_alpha=0.2157 | mean_|grad|=0.000040 (n=250)
+  [trace step 1000] block 1: fast=178 medium=200 slow=134 | mean_alpha=0.2157 | mean_|grad|=0.000015 (n=250)
+  [trace step 1000] block 2: fast=179 medium=199 slow=134 | mean_alpha=0.2158 | mean_|grad|=0.000003 (n=250)
+  [trace step 1000] block 3: fast=179 medium=199 slow=134 | mean_alpha=0.2160 | mean_|grad|=0.000004 (n=250)
+  [trace step 1000] block 4: fast=178 medium=200 slow=134 | mean_alpha=0.2159 | mean_|grad|=0.000010 (n=250)
+step 1000/1800 | epoch 2 | loss 5.5491 | 1.4 steps/s
+  [trace step 1250] block 0: fast=178 medium=199 slow=135 | mean_alpha=0.2158 | mean_|grad|=0.000056 (n=250)
+  [trace step 1250] block 1: fast=178 medium=200 slow=134 | mean_alpha=0.2157 | mean_|grad|=0.000003 (n=250)
+  [trace step 1250] block 2: fast=178 medium=200 slow=134 | mean_alpha=0.2159 | mean_|grad|=0.000002 (n=250)
+  [trace step 1250] block 3: fast=179 medium=199 slow=134 | mean_alpha=0.2161 | mean_|grad|=0.000003 (n=250)
+  [trace step 1250] block 4: fast=178 medium=200 slow=134 | mean_alpha=0.2160 | mean_|grad|=0.000004 (n=250)
+step 1250/1800 | epoch 2 | loss 5.5470 | 1.5 steps/s
+  validation: loss 5.5469 | 8.003 bits/byte
+  [trace step 1500] block 0: fast=178 medium=200 slow=134 | mean_alpha=0.2158 | mean_|grad|=0.000038 (n=250)
+  [trace step 1500] block 1: fast=178 medium=200 slow=134 | mean_alpha=0.2158 | mean_|grad|=0.000001 (n=250)
+  [trace step 1500] block 2: fast=178 medium=200 slow=134 | mean_alpha=0.2160 | mean_|grad|=0.000001 (n=250)
+  [trace step 1500] block 3: fast=177 medium=201 slow=134 | mean_alpha=0.2162 | mean_|grad|=0.000003 (n=250)
+  [trace step 1500] block 4: fast=177 medium=201 slow=134 | mean_alpha=0.2160 | mean_|grad|=0.000003 (n=250)
+step 1500/1800 | epoch 2 | loss 5.5460 | 1.3 steps/s
+  [trace step 1750] block 0: fast=178 medium=200 slow=134 | mean_alpha=0.2159 | mean_|grad|=0.000031 (n=250)
+  [trace step 1750] block 1: fast=178 medium=200 slow=134 | mean_alpha=0.2158 | mean_|grad|=0.000004 (n=250)
+  [trace step 1750] block 2: fast=178 medium=200 slow=134 | mean_alpha=0.2161 | mean_|grad|=0.000002 (n=250)
+  [trace step 1750] block 3: fast=177 medium=201 slow=134 | mean_alpha=0.2163 | mean_|grad|=0.000003 (n=250)
+  [trace step 1750] block 4: fast=177 medium=201 slow=134 | mean_alpha=0.2161 | mean_|grad|=0.000002 (n=250)
+step 1750/1800 | epoch 2 | loss 5.5457 | 1.5 steps/s
+eva: process memory peak 467.5 MB
+
+-- what holds the training memory --
+  parameters                52.4 MB   (unavoidable)
+  AdamW state              104.8 MB   (unavoidable today)
+  GRAPH, own peak           15.0 MB
+  live nodes, peak           119
+  graph alive now            0.0 MB   (0 if everything was freed)
+  GRADIENT MAP              52.4 MB   <- a new Vec per tensor, every step
+
+-- who holds, accumulated over the whole training run --
+  clockmem_readwin   19018.8 MB in    9500 nodes     67%
+  sigmoid             9518.6 MB in   19000 nodes     33%
+  gather                 7.5 MB in    1900 nodes      0%
+  ce                     7.4 MB in    1900 nodes      0%
+  add                    2.8 MB in   66500 nodes      0%
+  matmul                 1.6 MB in   68400 nodes      0%
+  rms_norm               0.6 MB in   30400 nodes      0%
+  mul                    0.4 MB in    9500 nodes      0%
+  parameter copies from a shared Arc: 0  (has to be 0)
+eva: FINAL VALIDATION loss 5.5468 | 8.002 bits/byte (100 windows, arch clock)
+eva: rule 'all' | 1800 forward, 1800 backward (100% learned)
+eva: training finished in 1276.7s, weights in 16m5b_N128_T1_win129_df128_lr10.weights

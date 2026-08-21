@@ -1,0 +1,53 @@
+### ATTN (Martha) k2 BIG
+eva eval_associative: 16m5b_assoc_k2_big_attn.weights | data/assoc_k2_seq512_win1500_seed42.dat | seq=512
+  windows: 1349 train, 150 val (contiguous cut)
+
+=== VAL (unseen text) ===
+  bucket               n    acc%      bpb
+  gap<=32           1320    4.55   5.2119
+  32<gap<=128       1575    3.24   5.2485
+  128<gap<=256        95    7.37   5.1274
+  256<gap<=512         2    0.00   6.0965
+  gap>512              0    0.00   0.0000
+  binding (cold)     300    3.33   5.2472   <- unpredictable by construction (first occurrence)
+  filler           73508    2.31   7.5490   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+
+=== TRAIN (memorization reference) ===
+  bucket               n    acc%      bpb
+  gap<=32          11536    3.43   5.1675
+  32<gap<=128      14463    3.31   5.1764
+  128<gap<=256       789    3.30   5.1695
+  256<gap<=512        16    0.00   5.2125
+  gap>512              0    0.00   0.0000
+  binding (cold)    2698    3.11   5.1926   <- unpredictable by construction (first occurrence)
+  filler          661186    2.61   7.5044   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+
+
+### ATTN (Cristina, replica) k2 BIG
+eva eval_associative: 16m5b_assoc_k2_big_attn_Cristina.weights | data/assoc_k2_seq512_win1500_seed42.dat | seq=512
+  windows: 1349 train, 150 val (contiguous cut)
+
+=== VAL (unseen text) ===
+  bucket               n    acc%      bpb
+  gap<=32           1320    7.42   5.0533
+  32<gap<=128       1575    5.14   5.0872
+  128<gap<=256        95    9.47   4.9807
+  256<gap<=512         2    0.00   6.2403
+  gap>512              0    0.00   0.0000
+  binding (cold)     300    4.00   5.2376   <- unpredictable by construction (first occurrence)
+  filler           73508    2.25   7.5543   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+
+=== TRAIN (memorization reference) ===
+  bucket               n    acc%      bpb
+  gap<=32          11536    5.91   5.0202
+  32<gap<=128      14463    5.51   5.0339
+  128<gap<=256       789    5.70   5.0155
+  256<gap<=512        16    0.00   5.1035
+  gap>512              0    0.00   0.0000
+  binding (cold)    2698    3.48   5.1944   <- unpredictable by construction (first occurrence)
+  filler          661186    2.33   7.5470   <- non-key positions, structural reference
+  chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
+

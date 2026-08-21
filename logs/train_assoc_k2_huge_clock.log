@@ -1,0 +1,78 @@
+eva: dataset 11520000 bytes, 22499 windows, 13405701 params
+eva: 20249 windows to train on, 2250 to validate
+[eva] matmul on GPU: NVIDIA GeForce GTX 1650
+step 500/20249 | epoch 1 | loss 5.2649 | 1.4 steps/s
+step 1000/20249 | epoch 1 | loss 5.1689 | 1.7 steps/s
+step 1500/20249 | epoch 1 | loss 5.1630 | 1.7 steps/s
+step 2000/20249 | epoch 1 | loss 5.1529 | 1.7 steps/s
+step 2500/20249 | epoch 1 | loss 5.1363 | 1.7 steps/s
+  validation: loss 5.1322 | 7.404 bits/byte
+step 3000/20249 | epoch 1 | loss 5.1312 | 0.7 steps/s
+step 3500/20249 | epoch 1 | loss 5.1218 | 1.7 steps/s
+step 4000/20249 | epoch 1 | loss 5.1223 | 1.7 steps/s
+step 4500/20249 | epoch 1 | loss 5.1111 | 1.7 steps/s
+step 5000/20249 | epoch 1 | loss 5.0977 | 1.7 steps/s
+  validation: loss 5.0943 | 7.349 bits/byte
+sample: "+H����F`iw���m{��\"��@�F��]�i�mڇ�uFssu\u{1}\"�@�l��\u{1}\"|�m{��|3�����"
+step 5500/20249 | epoch 1 | loss 5.0816 | 0.7 steps/s
+step 6000/20249 | epoch 1 | loss 5.0664 | 1.7 steps/s
+step 6500/20249 | epoch 1 | loss 5.0411 | 1.7 steps/s
+step 7000/20249 | epoch 1 | loss 5.0273 | 1.7 steps/s
+step 7500/20249 | epoch 1 | loss 5.0189 | 1.7 steps/s
+  validation: loss 5.0155 | 7.236 bits/byte
+step 8000/20249 | epoch 1 | loss 5.0155 | 0.7 steps/s
+step 8500/20249 | epoch 1 | loss 5.0126 | 1.7 steps/s
+step 9000/20249 | epoch 1 | loss 5.0134 | 1.7 steps/s
+step 9500/20249 | epoch 1 | loss 5.0184 | 1.7 steps/s
+step 10000/20249 | epoch 1 | loss 5.0121 | 1.7 steps/s
+  validation: loss 5.0128 | 7.232 bits/byte
+sample: "&�{Iv�ݟ\u{1}%PxY^��I�aP�Pe�e&����&f�Po{e4��oI&�﮵\u{1}%��k�\\���I��"
+step 10500/20249 | epoch 1 | loss 5.0148 | 0.7 steps/s
+step 11000/20249 | epoch 1 | loss 5.0105 | 1.7 steps/s
+step 11500/20249 | epoch 1 | loss 5.0137 | 1.7 steps/s
+step 12000/20249 | epoch 1 | loss 5.0137 | 1.7 steps/s
+step 12500/20249 | epoch 1 | loss 5.0102 | 1.7 steps/s
+  validation: loss 5.0102 | 7.228 bits/byte
+step 13000/20249 | epoch 1 | loss 5.0095 | 0.7 steps/s
+step 13500/20249 | epoch 1 | loss 5.0161 | 1.7 steps/s
+step 14000/20249 | epoch 1 | loss 5.0127 | 1.7 steps/s
+step 14500/20249 | epoch 1 | loss 5.0087 | 1.7 steps/s
+step 15000/20249 | epoch 1 | loss 5.0094 | 1.7 steps/s
+  validation: loss 5.0092 | 7.227 bits/byte
+sample: ",��PQ``���w,�{OQQ_^\u{1}5|GQ��`O�Q����`y��,��O�n\u{1}5C�C��M��LX����"
+step 15500/20249 | epoch 1 | loss 5.0147 | 0.7 steps/s
+step 16000/20249 | epoch 1 | loss 5.0100 | 1.7 steps/s
+step 16500/20249 | epoch 1 | loss 5.0105 | 1.7 steps/s
+step 17000/20249 | epoch 1 | loss 5.0093 | 1.7 steps/s
+step 17500/20249 | epoch 1 | loss 5.0105 | 1.7 steps/s
+  validation: loss 5.0123 | 7.231 bits/byte
+step 18000/20249 | epoch 1 | loss 5.0127 | 0.7 steps/s
+step 18500/20249 | epoch 1 | loss 5.0075 | 1.7 steps/s
+step 19000/20249 | epoch 1 | loss 5.0107 | 1.7 steps/s
+step 19500/20249 | epoch 1 | loss 5.0090 | 1.7 steps/s
+step 20000/20249 | epoch 1 | loss 5.0095 | 1.7 steps/s
+  validation: loss 5.0085 | 7.226 bits/byte
+sample: "-W�sRsy�s�hH-�s��^\u{1}2��s�s�o�}�^]�h\u{1}2��]�Uz-�hssx��o���\u{1}2���۳U"
+eva: process memory peak 539.7 MB
+
+-- what holds the training memory --
+  parameters                51.1 MB   (unavoidable)
+  AdamW state              102.3 MB   (unavoidable today)
+  GRAPH, own peak           10.0 MB
+  live nodes, peak           119
+  graph alive now            0.0 MB   (0 if everything was freed)
+  GRADIENT MAP              51.1 MB   <- a new Vec per tensor, every step
+
+-- who holds, accumulated over the whole training run --
+  clockmem          191622.2 MB in  191245 nodes     50%
+  sigmoid           191618.5 MB in  382490 nodes     50%
+  gather               150.0 MB in   38249 nodes      0%
+  ce                   149.4 MB in   38249 nodes      0%
+  add                   55.4 MB in 1338715 nodes      0%
+  matmul                31.5 MB in 1376964 nodes      0%
+  rms_norm              11.7 MB in  611984 nodes      0%
+  mul                    8.8 MB in  191245 nodes      0%
+  parameter copies from a shared Arc: 0  (has to be 0)
+eva: FINAL VALIDATION loss 5.0096 | 7.227 bits/byte (2250 windows, arch clock)
+eva: rule 'all' | 20249 forward, 20249 backward (100% learned)
+eva: training finished in 15917.8s, weights in 16m5b_assoc_k2_huge_clock.weights

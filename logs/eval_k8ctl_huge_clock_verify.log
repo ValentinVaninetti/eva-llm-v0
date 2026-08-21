@@ -1,0 +1,4 @@
+eva eval_associative: 16m5b_assoc_k8ctl_huge_clock.weights | data/assoc_k8ctl_seq512_win22500_seed42.dat | seq=512
+  windows: 20249 train, 2250 val (contiguous cut)
+
+[eva] matmul on GPU: NVIDIA GeForce GTX 1650

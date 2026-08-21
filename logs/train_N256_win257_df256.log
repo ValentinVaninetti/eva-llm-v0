@@ -1,0 +1,5 @@
+eva: EVA_READ_LR=10: readout lr scaled on 5 wread params
+eva: dataset 512001 bytes, 1000 windows, 14063621 params
+eva: 900 windows to train on, 100 to validate
+eva: alpha/gradient TRACE ACTIVE (EVA_ALPHA_TRACE)
+[eva] matmul on GPU: NVIDIA GeForce GTX 1650

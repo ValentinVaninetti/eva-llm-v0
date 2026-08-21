@@ -1,0 +1,32 @@
+eva: dataset 768000 bytes, 1499 windows, 13405701 params
+eva: 1349 windows to train on, 150 to validate
+[eva] matmul on GPU: NVIDIA GeForce GTX 1650
+step 500/2698 | epoch 1 | loss 5.2720 | 1.4 steps/s
+step 1000/2698 | epoch 1 | loss 5.1693 | 1.4 steps/s
+step 1500/2698 | epoch 2 | loss 5.1572 | 1.4 steps/s
+step 2000/2698 | epoch 2 | loss 5.1409 | 1.4 steps/s
+step 2500/2698 | epoch 2 | loss 5.1404 | 1.4 steps/s
+  validation: loss 5.1552 | 7.437 bits/byte
+eva: process memory peak 457.5 MB
+
+-- what holds the training memory --
+  parameters                51.1 MB   (unavoidable)
+  AdamW state              102.3 MB   (unavoidable today)
+  GRAPH, own peak           10.0 MB
+  live nodes, peak           119
+  graph alive now            0.0 MB   (0 if everything was freed)
+  GRADIENT MAP              51.1 MB   <- a new Vec per tensor, every step
+
+-- who holds, accumulated over the whole training run --
+  clockmem           14268.1 MB in   14240 nodes     50%
+  sigmoid            14267.8 MB in   28480 nodes     50%
+  gather                11.2 MB in    2848 nodes      0%
+  ce                    11.1 MB in    2848 nodes      0%
+  add                    4.1 MB in   99680 nodes      0%
+  matmul                 2.3 MB in  102528 nodes      0%
+  rms_norm               0.9 MB in   45568 nodes      0%
+  mul                    0.7 MB in   14240 nodes      0%
+  parameter copies from a shared Arc: 0  (has to be 0)
+eva: FINAL VALIDATION loss 5.1493 | 7.429 bits/byte (150 windows, arch clock)
+eva: rule 'all' | 2698 forward, 2698 backward (100% learned)
+eva: training finished in 2021.9s, weights in 16m5b_assoc_k2_big_clock.weights

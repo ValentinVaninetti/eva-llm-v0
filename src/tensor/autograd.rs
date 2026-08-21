@@ -479,6 +479,310 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
             push(4, ga);
             push(5, vec![gb]);
         }
+        "clockmem_lowrank" => {
+            // Backward of the low-rank outer-product write (see
+            // ops::clockmem_lowrank_from). The element-wise half is
+            // identical to "clockmem"; everything after `gm` is the new
+            // path. The r x r carry `gm` plays exactly the role `gs` plays
+            // for the element-wise state: it walks backwards in t picking up
+            // each position's contribution and decaying by alpha_m.
+            let (s, d, r) = (n.saved_u[0], n.saved_u[1], n.saved_u[2]);
+            let beta = n.saved_f[0];
+            let q = &n.saved_v[0];
+            let k = &n.saved_v[1];
+            let v = &n.saved_v[2];
+            let gg = &n.saved_v[3];
+            let state = &n.saved_v[4];
+            let alpha = &n.saved_v[5];
+            let s0 = &n.saved_v[6];
+            let kr = &n.saved_v[7];
+            let vr = &n.saved_v[8];
+            let qr = &n.saved_v[9];
+            let mhist = &n.saved_v[10];
+            let pk = &n.saved_v[11];
+            let pv = &n.saved_v[12];
+            let pq = &n.saved_v[13];
+            let po = &n.saved_v[14];
+            let am = &n.saved_v[15];
+
+            let mut gq = vec![0.0; s * d];
+            let mut gk = vec![0.0; s * d];
+            let mut gv = vec![0.0; s * d];
+            let mut ggg = vec![0.0; s * d];
+            let mut ga = vec![0.0; d];
+            let mut gb = 0.0f32;
+            let mut gs = vec![0.0; d];
+            let mut gpk = vec![0.0; d * r];
+            let mut gpv = vec![0.0; d * r];
+            let mut gpq = vec![0.0; d * r];
+            let mut gpo = vec![0.0; r * d];
+            let mut gam = vec![0.0; r];
+            let mut gm = vec![0.0f32; r * r];
+
+            crate::prof::time(crate::prof::P::ClockBwd, || {
+            for t in (0..s).rev() {
+                let gt = &g[t * d..(t + 1) * d];
+
+                // ---- element-wise path (unchanged from "clockmem") ----
+                for c in 0..d {
+                    let go = gt[c];
+                    ggg[t * d + c] += go * q[t * d + c] * state[t * d + c];
+                    gq[t * d + c] += go * state[t * d + c] * gg[t * d + c];
+                    gs[c] += go * q[t * d + c] * gg[t * d + c];
+                }
+
+                // ---- low-rank path ----
+                // out[t,c] += sum_j rd[t,j]*po[j,c], and rd is not stored:
+                // recompute it from qr and M[t] (r*r work, cheaper than
+                // having saved s*r more numbers).
+                let mt = &mhist[t * r * r..(t + 1) * r * r];
+                let mut grd = vec![0.0f32; r];
+                for j in 0..r {
+                    let mut acc = 0.0f32;
+                    for c in 0..d {
+                        acc += gt[c] * po[j * d + c];
+                    }
+                    grd[j] = acc;
+                }
+                for j in 0..r {
+                    let mut rdj = 0.0f32;
+                    for i in 0..r {
+                        rdj += qr[t * r + i] * mt[i * r + j];
+                    }
+                    if rdj != 0.0 {
+                        for c in 0..d {
+                            gpo[j * d + c] += rdj * gt[c];
+                        }
+                    }
+                }
+                // rd[t,j] = sum_i qr[t,i]*M[t][i,j]
+                let mut gqr = vec![0.0f32; r];
+                for i in 0..r {
+                    let mut acc = 0.0f32;
+                    for j in 0..r {
+                        acc += grd[j] * mt[i * r + j];
+                        gm[i * r + j] += qr[t * r + i] * grd[j];
+                    }
+                    gqr[i] = acc;
+                }
+                // M[t][i,j] = am[i]*M[t-1][i,j] + beta*kr[t,i]*vr[t,j]
+                let mut gkr = vec![0.0f32; r];
+                let mut gvr = vec![0.0f32; r];
+                for i in 0..r {
+                    let mut acc_kr = 0.0f32;
+                    for j in 0..r {
+                        let gmij = gm[i * r + j];
+                        // At t=0 the previous M is zero (M is not carried
+                        // across windows -- declared in the op's doc), so
+                        // alpha_m gets no gradient there, which is correct.
+                        let prev = if t == 0 { 0.0 } else { mhist[(t - 1) * r * r + i * r + j] };
+                        gam[i] += gmij * prev;
+                        acc_kr += gmij * beta * vr[t * r + j];
+                        gvr[j] += gmij * beta * kr[t * r + i];
+                        gb += gmij * kr[t * r + i] * vr[t * r + j];
+                    }
+                    gkr[i] = acc_kr;
+                }
+                // Projections down: kr/vr/qr = k/v/q times pk/pv/pq.
+                for c in 0..d {
+                    let (kc, vc, qc) = (k[t * d + c], v[t * d + c], q[t * d + c]);
+                    let (mut ak, mut av, mut aq) = (0.0f32, 0.0f32, 0.0f32);
+                    for i in 0..r {
+                        gpk[c * r + i] += kc * gkr[i];
+                        gpv[c * r + i] += vc * gvr[i];
+                        gpq[c * r + i] += qc * gqr[i];
+                        ak += gkr[i] * pk[c * r + i];
+                        av += gvr[i] * pv[c * r + i];
+                        aq += gqr[i] * pq[c * r + i];
+                    }
+                    gk[t * d + c] += ak;
+                    gv[t * d + c] += av;
+                    gq[t * d + c] += aq;
+                }
+                // Decay the r x r carry, same as gs[c] *= alpha[c] below.
+                for i in 0..r {
+                    let ai = am[i];
+                    for j in 0..r {
+                        gm[i * r + j] *= ai;
+                    }
+                }
+
+                // ---- element-wise recurrence (unchanged) ----
+                for c in 0..d {
+                    let prev_state = if t == 0 { s0[c] } else { state[(t - 1) * d + c] };
+                    ga[c] += gs[c] * prev_state;
+                    gb += gs[c] * k[t * d + c] * v[t * d + c];
+                    gk[t * d + c] += gs[c] * beta * v[t * d + c];
+                    gv[t * d + c] += gs[c] * beta * k[t * d + c];
+                }
+                for c in 0..d {
+                    gs[c] *= alpha[c];
+                }
+            }
+            });
+            push(0, gq);
+            push(1, gk);
+            push(2, gv);
+            push(3, ggg);
+            push(4, ga);
+            push(5, vec![gb]);
+            push(6, gpk);
+            push(7, gpv);
+            push(8, gpq);
+            push(9, gpo);
+            push(10, gam);
+        }
+        "clockmem_gated" => {
+            // Same graph as "clockmem", but the write magnitude is the
+            // position-dependent beta_t = beta * r_t the forward saved (the
+            // gate is detached, so r_t are constants here). Gradients only
+            // differ in the extra factor r_t on the write path.
+            let (s, d) = (n.saved_u[0], n.saved_u[1]);
+            let beta = n.saved_f[0];
+            let rs = &n.saved_f[1..];
+            assert_eq!(rs.len(), s, "clockmem_gated saved {} r_t for {} positions", rs.len(), s);
+            let q = &n.saved_v[0];
+            let k = &n.saved_v[1];
+            let v = &n.saved_v[2];
+            let gg = &n.saved_v[3];
+            let state = &n.saved_v[4];
+            let alpha = &n.saved_v[5];
+            let s0 = &n.saved_v[6];
+            let mut gq = vec![0.0; s * d];
+            let mut gk = vec![0.0; s * d];
+            let mut gv = vec![0.0; s * d];
+            let mut ggg = vec![0.0; s * d];
+            let mut ga = vec![0.0; d];
+            let mut gb = 0.0;
+            let mut gs = vec![0.0; d];
+            crate::prof::time(crate::prof::P::ClockBwd, || {
+            for t in (0..s).rev() {
+                let gt = &g[t * d..(t + 1) * d];
+                for c in 0..d {
+                    let go = gt[c];
+                    ggg[t * d + c] += go * q[t * d + c] * state[t * d + c];
+                    gq[t * d + c] += go * state[t * d + c] * gg[t * d + c];
+                    gs[c] += go * q[t * d + c] * gg[t * d + c];
+                }
+                let beta_t = beta * rs[t];
+                for c in 0..d {
+                    let prev_state = if t == 0 { s0[c] } else { state[(t - 1) * d + c] };
+                    ga[c] += gs[c] * prev_state;
+                    gb += gs[c] * k[t * d + c] * v[t * d + c] * rs[t];
+                    gk[t * d + c] += gs[c] * beta_t * v[t * d + c];
+                    gv[t * d + c] += gs[c] * beta_t * k[t * d + c];
+                }
+                for c in 0..d {
+                    gs[c] *= alpha[c];
+                }
+            }
+            });
+            push(0, gq);
+            push(1, gk);
+            push(2, gv);
+            push(3, ggg);
+            push(4, ga);
+            push(5, vec![gb]);
+        }
+        "clockmem_readwin" => {            let (s, d, kwin) = (n.saved_u[0], n.saved_u[1], n.saved_u[2]);
+            let beta = n.saved_f[0];
+            let q = &n.saved_v[0];
+            let k = &n.saved_v[1];
+            let v = &n.saved_v[2];
+            let gg = &n.saved_v[3];
+            let state = &n.saved_v[4];
+            let read = &n.saved_v[5];
+            let alpha = &n.saved_v[6];
+            let s0 = &n.saved_v[7];
+            let w = &n.saved_v[8];
+            let mut gq = vec![0.0; s * d];
+            let mut gk = vec![0.0; s * d];
+            let mut gv = vec![0.0; s * d];
+            let mut ggg = vec![0.0; s * d];
+            let mut ga = vec![0.0; d];
+            let mut gb = 0.0f32;
+            let mut gw = vec![0.0; kwin * d];
+            let mut gs = vec![0.0; d];
+            // vals[t,c] = g[t,c]*q[t,c]*gg[t,c] -- reused by every j in the
+            // window for both `direct` and `gw`.
+            let mut vals = vec![0.0; s * d];
+            for i in 0..s * d {
+                vals[i] = g[i] * q[i] * gg[i];
+            }
+            let bands = crate::pool::global().workers() + 1;
+            // direct[t,c] = sum_j vals[t+j,c]*w[j,c] (t+j < s), parallel over
+            // t-bands with c inner for sequential/SIMD friendly access.
+            let mut direct = vec![0.0; s * d];
+            let (s_f, d_f, kwin_f) = (s, d, kwin);
+            let vals_ptr = crate::pool::Ptr(vals.as_ptr());
+            let w_ptr = crate::pool::Ptr(w.as_ptr());
+            let direct_ptr = crate::pool::Ptr(direct.as_mut_ptr());
+            crate::pool::global().run(bands, move |b| {
+                let t0 = b * s_f / bands;
+                let t1 = ((b + 1) * s_f / bands).min(s_f);
+                let vals = vals_ptr.as_ref(s_f * d_f);
+                let w = w_ptr.as_ref(kwin_f * d_f);
+                let direct = direct_ptr.as_mut(s_f * d_f);
+                for t in t0..t1 {
+                    let jmax = kwin_f.min(s_f - t);
+                    let toff = t * d_f;
+                    for j in 0..jmax {
+                        let woff = j * d_f;
+                        let moff = (t + j) * d_f;
+                        for c in 0..d_f {
+                            direct[toff + c] += vals[moff + c] * w[woff + c];
+                        }
+                    }
+                }
+            });
+            // gw[j,c] = sum_{t>=j} vals[t,c]*state[t-j,c], parallel over j-bands.
+            let (s_f2, d_f2, kwin_f2) = (s, d, kwin);
+            let vals_ptr2 = crate::pool::Ptr(vals.as_ptr());
+            let state_ptr = crate::pool::Ptr(state.as_ptr());
+            let gw_ptr = crate::pool::Ptr(gw.as_mut_ptr());
+            crate::pool::global().run(bands, move |b| {
+                let j0 = b * kwin_f2 / bands;
+                let j1 = ((b + 1) * kwin_f2 / bands).min(kwin_f2);
+                let vals = vals_ptr2.as_ref(s_f2 * d_f2);
+                let state = state_ptr.as_ref(s_f2 * d_f2);
+                let gw = gw_ptr.as_mut(kwin_f2 * d_f2);
+                for j in j0..j1 {
+                    let woff = j * d_f2;
+                    for t in j..s_f2 {
+                        let toff = t * d_f2;
+                        let soff = (t - j) * d_f2;
+                        for c in 0..d_f2 {
+                            gw[woff + c] += vals[toff + c] * state[soff + c];
+                        }
+                    }
+                }
+            });
+            for t in (0..s).rev() {
+                for c in 0..d {
+                    let go = g[t * d + c];
+                    gq[t * d + c] += go * gg[t * d + c] * read[t * d + c];
+                    ggg[t * d + c] += go * q[t * d + c] * read[t * d + c];
+                    gs[c] += direct[t * d + c];
+                }
+                for c in 0..d {
+                    let prev = if t == 0 { s0[c] } else { state[(t - 1) * d + c] };
+                    ga[c] += gs[c] * prev;
+                    gb += gs[c] * k[t * d + c] * v[t * d + c];
+                    gk[t * d + c] += gs[c] * beta * v[t * d + c];
+                    gv[t * d + c] += gs[c] * beta * k[t * d + c];
+                }
+                for c in 0..d {
+                    gs[c] *= alpha[c];
+                }
+            }
+            push(0, gq);
+            push(1, gk);
+            push(2, gv);
+            push(3, ggg);
+            push(4, ga);
+            push(5, vec![gb]);
+            push(6, gw);
+        }
         "concat" => {
             let (s, d) = (n.saved_u[0], n.saved_u[1]);
             for i in 0..s {
@@ -519,6 +823,377 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
             push(0, gh);
             push(1, gw);
             push(2, vec![gb]);
+        }
+        "clockmem_inject" => {
+            let (s, d, nn) = (n.saved_u[0], n.saved_u[1], n.saved_u[2]);
+            let beta = n.saved_f[0];
+            let q = &n.saved_v[0];
+            let k = &n.saved_v[1];
+            let v = &n.saved_v[2];
+            let gg = &n.saved_v[3];
+            let state = &n.saved_v[4];
+            let alpha = &n.saved_v[5];
+            let s0 = &n.saved_v[6];
+            let mut gq = vec![0.0; s * d];
+            let mut gk = vec![0.0; s * d];
+            let mut gv = vec![0.0; s * d];
+            let mut ggg = vec![0.0; s * d];
+            let mut ga = vec![0.0; d];
+            let mut gb = 0.0f32;
+            let mut gs = vec![0.0; d];
+            // State-gradient contributions from the injected write_rec term:
+            //   write_rec[t,c] = cur[t-N+1,c]/beta - alpha_c*cur[t-N,c]/beta
+            //   -> state[t-N+1] gets +g[t]/beta, state[t-N] gets -g[t]*alpha/beta.
+            let mut gs_extra = vec![0.0; s * d];
+            for t in nn..s {
+                let u = t - nn + 1;
+                let w = t - nn;
+                for c in 0..d {
+                    let go = g[t * d + c];
+                    gs_extra[u * d + c] += go / beta;
+                    gs_extra[w * d + c] += -go * alpha[c] / beta;
+                    // Explicit alpha dependence of the -alpha/beta tap.
+                    ga[c] += go * (-state[w * d + c] / beta);
+                    // Explicit beta dependence: d(write_rec)/d(beta) = -write_rec/beta.
+                    let rec = (state[u * d + c] - alpha[c] * state[w * d + c]) / beta;
+                    gb += go * (-rec / beta);
+                }
+            }
+            for t in (0..s).rev() {
+                let gt = &g[t * d..(t + 1) * d];
+                for c in 0..d {
+                    let go = gt[c];
+                    ggg[t * d + c] += go * q[t * d + c] * state[t * d + c];
+                    gq[t * d + c] += go * state[t * d + c] * gg[t * d + c];
+                    gs[c] += go * q[t * d + c] * gg[t * d + c];
+                    gs[c] += gs_extra[t * d + c];
+                }
+                for c in 0..d {
+                    let prev_state = if t == 0 { s0[c] } else { state[(t - 1) * d + c] };
+                    ga[c] += gs[c] * prev_state;
+                    gb += gs[c] * k[t * d + c] * v[t * d + c];
+                    gk[t * d + c] += gs[c] * beta * v[t * d + c];
+                    gv[t * d + c] += gs[c] * beta * k[t * d + c];
+                }
+                for c in 0..d {
+                    gs[c] *= alpha[c];
+                }
+            }
+            push(0, gq);
+            push(1, gk);
+            push(2, gv);
+            push(3, ggg);
+            push(4, ga);
+            push(5, vec![gb]);
+        }
+        "clockmem_readwin_inj" => {
+            let (s, d, kwin) = (n.saved_u[0], n.saved_u[1], n.saved_u[2]);
+            let beta = n.saved_f[0];
+            let q = &n.saved_v[0];
+            let k = &n.saved_v[1];
+            let v = &n.saved_v[2];
+            let gg = &n.saved_v[3];
+            let state = &n.saved_v[4];
+            let alpha = &n.saved_v[6];
+            let s0 = &n.saved_v[7];
+            let w = &n.saved_v[8];
+            let mut gq = vec![0.0; s * d];
+            let mut gk = vec![0.0; s * d];
+            let mut gv = vec![0.0; s * d];
+            let mut ggg = vec![0.0; s * d];
+            let mut ga = vec![0.0; d];
+            let mut gb = 0.0f32;
+            let mut gw = vec![0.0; kwin * d];
+            let mut gs = vec![0.0; d];
+            // direct[t,c] = go[t,c]*q[t,c]*gg[t,c]   (the q*cur*g term)
+            //             + sum_j w[j,c]*go[t+j,c]   (the read term, t+j<s)
+            let bands = crate::pool::global().workers() + 1;
+            let mut direct = vec![0.0; s * d];
+            for i in 0..s * d {
+                direct[i] = g[i] * q[i] * gg[i];
+            }
+            let (s_f, d_f, kwin_f) = (s, d, kwin);
+            let g_ptr = crate::pool::Ptr(g.as_ptr());
+            let w_ptr = crate::pool::Ptr(w.as_ptr());
+            let direct_ptr = crate::pool::Ptr(direct.as_mut_ptr());
+            crate::pool::global().run(bands, move |b| {
+                let t0 = b * s_f / bands;
+                let t1 = ((b + 1) * s_f / bands).min(s_f);
+                let g = g_ptr.as_ref(s_f * d_f);
+                let w = w_ptr.as_ref(kwin_f * d_f);
+                let direct = direct_ptr.as_mut(s_f * d_f);
+                for t in t0..t1 {
+                    let jmax = kwin_f.min(s_f - t);
+                    let toff = t * d_f;
+                    for j in 0..jmax {
+                        let woff = j * d_f;
+                        let goff = (t + j) * d_f;
+                        for c in 0..d_f {
+                            direct[toff + c] += w[woff + c] * g[goff + c];
+                        }
+                    }
+                }
+            });
+            // gw[j,c] = sum_{t>=j} g[t,c]*state[t-j,c], parallel over j-bands.
+            let g_ptr2 = crate::pool::Ptr(g.as_ptr());
+            let state_ptr = crate::pool::Ptr(state.as_ptr());
+            let gw_ptr = crate::pool::Ptr(gw.as_mut_ptr());
+            crate::pool::global().run(bands, move |b| {
+                let j0 = b * kwin_f / bands;
+                let j1 = ((b + 1) * kwin_f / bands).min(kwin_f);
+                let g = g_ptr2.as_ref(s_f * d_f);
+                let state = state_ptr.as_ref(s_f * d_f);
+                let gw = gw_ptr.as_mut(kwin_f * d_f);
+                for j in j0..j1 {
+                    let woff = j * d_f;
+                    for t in j..s_f {
+                        let toff = t * d_f;
+                        let soff = (t - j) * d_f;
+                        for c in 0..d_f {
+                            gw[woff + c] += g[toff + c] * state[soff + c];
+                        }
+                    }
+                }
+            });
+            for t in (0..s).rev() {
+                for c in 0..d {
+                    let go = g[t * d + c];
+                    gq[t * d + c] += go * gg[t * d + c] * state[t * d + c];
+                    ggg[t * d + c] += go * q[t * d + c] * state[t * d + c];
+                    gs[c] += direct[t * d + c];
+                }
+                for c in 0..d {
+                    let prev = if t == 0 { s0[c] } else { state[(t - 1) * d + c] };
+                    ga[c] += gs[c] * prev;
+                    gb += gs[c] * k[t * d + c] * v[t * d + c];
+                    gk[t * d + c] += gs[c] * beta * v[t * d + c];
+                    gv[t * d + c] += gs[c] * beta * k[t * d + c];
+                }
+                for c in 0..d {
+                    gs[c] *= alpha[c];
+                }
+            }
+            push(0, gq);
+            push(1, gk);
+            push(2, gv);
+            push(3, ggg);
+            push(4, ga);
+            push(5, vec![gb]);
+            push(6, gw);
+        }
+        "clockmem_inject_learn" => {
+            let (s, d, nn) = (n.saved_u[0], n.saved_u[1], n.saved_u[2]);
+            let beta = n.saved_f[0];
+            let q = &n.saved_v[0];
+            let k = &n.saved_v[1];
+            let v = &n.saved_v[2];
+            let gg = &n.saved_v[3];
+            let state = &n.saved_v[4];
+            let alpha = &n.saved_v[5];
+            let s0 = &n.saved_v[6];
+            let ar = &n.saved_v[7];
+            let ib = &n.saved_v[8];
+            let mut gq = vec![0.0; s * d];
+            let mut gk = vec![0.0; s * d];
+            let mut gv = vec![0.0; s * d];
+            let mut ggg = vec![0.0; s * d];
+            let mut ga = vec![0.0; d];
+            let mut gb = 0.0f32;
+            let mut gar = vec![0.0; d];
+            let mut gib = vec![0.0; d];
+            let mut gs = vec![0.0; d];
+            // read[t,c] = ib[c]*(state[t-N+1,c] - ar[c]*state[t-N,c])  (t>=N)
+            //   d/state[t-N+1] = ib[c]      d/state[t-N] = -ib[c]*ar[c]
+            //   d/ar[c] = -ib[c]*state[t-N,c]
+            //   d/ib[c] = state[t-N+1,c] - ar[c]*state[t-N,c]
+            // The physical alpha/beta do NOT appear in read (they only drive
+            // the state recurrence), so their gradients come from the
+            // recurrence alone -- unlike clockmem_inject, where write_rec
+            // also depends on the physical alpha/beta.
+            let mut gs_extra = vec![0.0; s * d];
+            for t in nn..s {
+                let u = t - nn + 1;
+                let w = t - nn;
+                for c in 0..d {
+                    let go = g[t * d + c];
+                    gs_extra[u * d + c] += go * ib[c];
+                    gs_extra[w * d + c] += -go * ib[c] * ar[c];
+                    gar[c] += go * (-ib[c] * state[w * d + c]);
+                    gib[c] += go * (state[u * d + c] - ar[c] * state[w * d + c]);
+                }
+            }
+            for t in (0..s).rev() {
+                let gt = &g[t * d..(t + 1) * d];
+                for c in 0..d {
+                    let go = gt[c];
+                    ggg[t * d + c] += go * q[t * d + c] * state[t * d + c];
+                    gq[t * d + c] += go * state[t * d + c] * gg[t * d + c];
+                    gs[c] += go * q[t * d + c] * gg[t * d + c];
+                    gs[c] += gs_extra[t * d + c];
+                }
+                for c in 0..d {
+                    let prev_state = if t == 0 { s0[c] } else { state[(t - 1) * d + c] };
+                    ga[c] += gs[c] * prev_state;
+                    gb += gs[c] * k[t * d + c] * v[t * d + c];
+                    gk[t * d + c] += gs[c] * beta * v[t * d + c];
+                    gv[t * d + c] += gs[c] * beta * k[t * d + c];
+                }
+                for c in 0..d {
+                    gs[c] *= alpha[c];
+                }
+            }
+            push(0, gq);
+            push(1, gk);
+            push(2, gv);
+            push(3, ggg);
+            push(4, ga);
+            push(5, vec![gb]);
+            push(6, gar);
+            push(7, gib);
+        }
+        "clockmem_inject_learn_g" => {
+            let (s, d, nn) = (n.saved_u[0], n.saved_u[1], n.saved_u[2]);
+            let (beta, s_gate, sp, floor) = (n.saved_f[0], n.saved_f[1], n.saved_f[2], n.saved_f[3]);
+            let q = &n.saved_v[0];
+            let k = &n.saved_v[1];
+            let v = &n.saved_v[2];
+            let gg = &n.saved_v[3];
+            let state = &n.saved_v[4];
+            let alpha = &n.saved_v[5];
+            let s0 = &n.saved_v[6];
+            let ar = &n.saved_v[7];
+            let ib = &n.saved_v[8];
+            let eff = &n.saved_v[9]; // s_gate * read_uns (the effective contribution)
+            let mut gq = vec![0.0; s * d];
+            let mut gk = vec![0.0; s * d];
+            let mut gv = vec![0.0; s * d];
+            let mut ggg = vec![0.0; s * d];
+            let mut ga = vec![0.0; d];
+            let mut gb = 0.0f32;
+            let mut gar = vec![0.0; d];
+            let mut gib = vec![0.0; d];
+            let mut gz = 0.0f32;
+            let mut gs = vec![0.0; d];
+            // Memory-path terms, scaled by s_gate (>= floor > 0, never annulled):
+            //   eff[t,c] = s_gate*ib[c]*(state[t-N+1,c] - ar[c]*state[t-N,c])
+            //   d/state[t-N+1] = s_gate*ib[c]   d/state[t-N] = -s_gate*ib[c]*ar[c]
+            //   d/ar[c] = -s_gate*ib[c]*state[t-N,c]
+            //   d/ib[c] = s_gate*(state[t-N+1,c] - ar[c]*state[t-N,c])
+            // Gate gradient: d(s)/dz = (1-floor)*sigmoid'(z) = (1-floor)*sp,
+            // and d(out)/dz = read_uns*ds/dz = (eff/s_gate)*(1-floor)*sp.
+            let mut gs_extra = vec![0.0; s * d];
+            for t in nn..s {
+                let u = t - nn + 1;
+                let w = t - nn;
+                for c in 0..d {
+                    let go = g[t * d + c];
+                    gs_extra[u * d + c] += go * s_gate * ib[c];
+                    gs_extra[w * d + c] += -go * s_gate * ib[c] * ar[c];
+                    gar[c] += go * s_gate * (-ib[c] * state[w * d + c]);
+                    gib[c] += go * s_gate * (state[u * d + c] - ar[c] * state[w * d + c]);
+                    gz += go * (eff[t * d + c] / s_gate) * (1.0 - floor) * sp;
+                }
+            }
+            for t in (0..s).rev() {
+                let gt = &g[t * d..(t + 1) * d];
+                for c in 0..d {
+                    let go = gt[c];
+                    ggg[t * d + c] += go * q[t * d + c] * state[t * d + c];
+                    gq[t * d + c] += go * state[t * d + c] * gg[t * d + c];
+                    gs[c] += go * q[t * d + c] * gg[t * d + c];
+                    gs[c] += gs_extra[t * d + c];
+                }
+                for c in 0..d {
+                    let prev_state = if t == 0 { s0[c] } else { state[(t - 1) * d + c] };
+                    ga[c] += gs[c] * prev_state;
+                    gb += gs[c] * k[t * d + c] * v[t * d + c];
+                    gk[t * d + c] += gs[c] * beta * v[t * d + c];
+                    gv[t * d + c] += gs[c] * beta * k[t * d + c];
+                }
+                for c in 0..d {
+                    gs[c] *= alpha[c];
+                }
+            }
+            push(0, gq);
+            push(1, gk);
+            push(2, gv);
+            push(3, ggg);
+            push(4, ga);
+            push(5, vec![gb]);
+            push(6, gar);
+            push(7, gib);
+            push(8, vec![gz]);
+        }
+        "clockmem_inject_learn_gc" => {
+            let (s, d, nn) = (n.saved_u[0], n.saved_u[1], n.saved_u[2]);
+            let (beta, floor) = (n.saved_f[0], n.saved_f[1]);
+            let q = &n.saved_v[0];
+            let k = &n.saved_v[1];
+            let v = &n.saved_v[2];
+            let gg = &n.saved_v[3];
+            let state = &n.saved_v[4];
+            let alpha = &n.saved_v[5];
+            let s0 = &n.saved_v[6];
+            let ar = &n.saved_v[7];
+            let ib = &n.saved_v[8];
+            let eff = &n.saved_v[9]; // s[c]*read_uns (the effective contribution)
+            let sg = &n.saved_v[10]; // s[c] per channel
+            let sp = &n.saved_v[11]; // sigmoid'(z[c]) per channel
+            let mut gq = vec![0.0; s * d];
+            let mut gk = vec![0.0; s * d];
+            let mut gv = vec![0.0; s * d];
+            let mut ggg = vec![0.0; s * d];
+            let mut ga = vec![0.0; d];
+            let mut gb = 0.0f32;
+            let mut gar = vec![0.0; d];
+            let mut gib = vec![0.0; d];
+            let mut gz = vec![0.0; d];
+            let mut gs = vec![0.0; d];
+            // Same as the scalar-gate backward, with s[c] in place of the
+            // block scalar: the floor guarantee holds per channel, so every
+            // channel's memory path keeps real gradient.
+            let mut gs_extra = vec![0.0; s * d];
+            for t in nn..s {
+                let u = t - nn + 1;
+                let w = t - nn;
+                for c in 0..d {
+                    let go = g[t * d + c];
+                    gs_extra[u * d + c] += go * sg[c] * ib[c];
+                    gs_extra[w * d + c] += -go * sg[c] * ib[c] * ar[c];
+                    gar[c] += go * sg[c] * (-ib[c] * state[w * d + c]);
+                    gib[c] += go * sg[c] * (state[u * d + c] - ar[c] * state[w * d + c]);
+                    gz[c] += go * (eff[t * d + c] / sg[c]) * (1.0 - floor) * sp[c];
+                }
+            }
+            for t in (0..s).rev() {
+                let gt = &g[t * d..(t + 1) * d];
+                for c in 0..d {
+                    let go = gt[c];
+                    ggg[t * d + c] += go * q[t * d + c] * state[t * d + c];
+                    gq[t * d + c] += go * state[t * d + c] * gg[t * d + c];
+                    gs[c] += go * q[t * d + c] * gg[t * d + c];
+                    gs[c] += gs_extra[t * d + c];
+                }
+                for c in 0..d {
+                    let prev_state = if t == 0 { s0[c] } else { state[(t - 1) * d + c] };
+                    ga[c] += gs[c] * prev_state;
+                    gb += gs[c] * k[t * d + c] * v[t * d + c];
+                    gk[t * d + c] += gs[c] * beta * v[t * d + c];
+                    gv[t * d + c] += gs[c] * beta * k[t * d + c];
+                }
+                for c in 0..d {
+                    gs[c] *= alpha[c];
+                }
+            }
+            push(0, gq);
+            push(1, gk);
+            push(2, gv);
+            push(3, ggg);
+            push(4, ga);
+            push(5, vec![gb]);
+            push(6, gar);
+            push(7, gib);
+            push(8, gz);
         }
         _ => panic!("backward not implemented for op {}", n.op),
     }

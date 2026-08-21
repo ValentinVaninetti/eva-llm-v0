@@ -94,8 +94,22 @@ pub struct EvaModel {
 }
 
 impl EvaModel {
+    /// INIT SEED (Claude, 2026-08-19). This used to be the bare constant
+    /// `0xE7A1`, which meant **initialization could not be varied at all**:
+    /// `--seed` moves the training-window order (and, under local credit,
+    /// the auxiliary heads), never these weights. Two runs at the same
+    /// `dim` therefore started from literally identical parameters, and
+    /// "run it with another seed" did not test init variance in the way the
+    /// phrase suggests.
+    ///
+    /// `EVA_INIT_SEED=n` overrides it. Unset keeps `0xE7A1` exactly, so
+    /// every existing run and checkpoint is untouched and reproducible.
     pub fn new(cfg: EvaConfig) -> Self {
-        let mut rng = Rng::new(0xE7A1);
+        let init_seed = std::env::var("EVA_INIT_SEED")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0xE7A1);
+        let mut rng = Rng::new(init_seed);
         let dim = cfg.dim;
         let bound = 1.0 / (dim as f32).sqrt();
         EvaModel {

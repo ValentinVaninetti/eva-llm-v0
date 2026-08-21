@@ -37,6 +37,121 @@ fn temperature() -> f32 {
     std::env::var("EVA_ALPHA_TEMP").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0)
 }
 
+/// SSM BASELINE (Claude/GPT/Valentín, 2026-08-15): `EVA_SSM_ALPHA=a` replaces
+/// the LEARNED per-channel clock with a FIXED slow alpha for every channel.
+/// Everything else is identical to base ClockMem -- same q/k/v/g, same beta,
+/// same recurrence, same readout `q*cur*g`, same windowed training, same
+/// carry eval. This is Claude's proposed baseline ("alpha fijo lento dentro
+/// de nuestro propio código"), to answer GPT's control: is the carry
+/// stability of T=1.3 a property of ANY slow-decay recurrence, or of the
+/// LEARNED alpha distribution specifically? Default 0.999: the code's own
+/// documented "slow but safe" value (~1000-token memory, state magnitude
+/// stays within ~1.25x of what training windows see, vs ~3x for 0.9999).
+fn ssm_alpha() -> Option<f32> {
+    std::env::var("EVA_SSM_ALPHA")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|&a| a > 0.0 && a < 1.0)
+}
+
+/// ERROR-GATED WRITE (probe): `EVA_WRITE_ERROR=1` makes the write magnitude
+/// position-dependent inside the SAME forward (see `ops::clockmem_gated_from`):
+/// each position writes `beta * r_t` instead of `beta`, where `r_t` shrinks
+/// the write when the content being written is already in the state. No new
+/// parameters; `EVA_WRITE_ERROR_P` sets the gate exponent (default 1.0, 0
+/// disables the gate) and `EVA_WRITE_ERROR_TRACE=1` records `r_t` for the
+/// measurement. Returning `None` keeps the plain write.
+fn write_error_gate() -> Option<(f32, bool)> {
+    if !std::env::var("EVA_WRITE_ERROR").is_ok() {
+        return None;
+    }
+    let p = std::env::var("EVA_WRITE_ERROR_P")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(1.0);
+    let trace = std::env::var("EVA_WRITE_ERROR_TRACE").is_ok();
+    Some((p, trace))
+}
+
+/// LOW-RANK OUTER-PRODUCT WRITE (task #58): `EVA_WRITE_LOWRANK=r` adds the
+/// rank-`r` matrix-state write of `ops::clockmem_lowrank_from` alongside the
+/// element-wise one. Unset (or 0) keeps the plain write, so every existing
+/// checkpoint and every run without the flag behaves exactly as before.
+///
+/// This is a WRITE experiment and is not meant to combine with the read
+/// experiments (R1/R1c/R2/oracle/inject), which answer a different question;
+/// if a read flag is also set, the read flag wins, matching how the other
+/// variants already dispatch.
+fn lowrank_rank() -> Option<usize> {
+    std::env::var("EVA_WRITE_LOWRANK")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&r| r > 0)
+}
+
+/// GATE ABLATION (Claude, 2026-08-19). `EVA_NO_GATE=1` replaces the
+/// multiplicative output gate with a constant 1, so the readout becomes
+/// `out = q*cur` instead of `out = q*cur*g`.
+///
+/// WHY. The `query_swap` diagnostic showed several trained models answer the
+/// same byte no matter WHICH key they are asked about (directional shift
+/// +0.0001 against +0.9941 for a model that binds). Section 4 of the draft
+/// already documented this exact gate destroying a read that was verifiably
+/// correct upstream of it, and the fix that worked there (R1/inject) was to
+/// route around it. So it is the suspect with a record, and it had never
+/// been ablated outright.
+///
+/// The `wg` projection stays in the parameter list and keeps its weights;
+/// it simply stops receiving gradient. That is deliberate: it keeps the
+/// parameter count IDENTICAL to the baseline, so an A/B differs in the
+/// mechanism and not in model size.
+fn no_gate() -> bool {
+    std::env::var("EVA_NO_GATE").is_ok()
+}
+
+/// ABLACIÓN DE LECTURA POR CANAL (Claude/GPT, 2026-08-20).
+/// `EVA_READ_MASK=c1,c2,...` anula la LECTURA de esos canales poniéndoles
+/// `g[c] = 0`, sin tocar la escritura ni la dinámica del estado.
+///
+/// POR QUÉ ASÍ. `out[t,c] = q[t,c]*cur[c]*g[t,c]`, y `g` se calcula acá
+/// afuera del op, así que anularlo es una ablación exacta de la lectura de
+/// ese canal sin necesidad de un op nuevo ni de tocar el backward. El estado
+/// sigue evolucionando igual: lo único que se corta es lo que ese canal
+/// aporta a la salida.
+///
+/// PARA QUÉ. Un modelo resuelve el recall asociativo al 99,77% y no sabemos
+/// cómo. Dos hipótesis con firmas distintas al apagar canales:
+///   - particionado por clave  -> apagar un grupo chico y específico hunde
+///     UNA clave y deja las otras casi intactas
+///   - representación distribuida / hash -> la caída es gradual y pareja,
+///     sin ningún grupo mágico
+/// Sólo de inferencia: no afecta el entrenamiento y sin la variable el
+/// comportamiento es idéntico al de siempre.
+fn read_mask() -> Option<Vec<usize>> {
+    let v = std::env::var("EVA_READ_MASK").ok()?;
+    let idx: Vec<usize> = v.split(',').filter_map(|t| t.trim().parse().ok()).collect();
+    if idx.is_empty() { None } else { Some(idx) }
+}
+
+/// Aplica la máscara a `g` (que ya viene con forma [S, D]).
+fn apply_read_mask(g: Tensor) -> Tensor {
+    match read_mask() {
+        None => g,
+        Some(idx) => {
+            let (s, d) = (g.shape[0], g.shape[1]);
+            let mut data = g.data.to_vec();
+            for t in 0..s {
+                for &c in &idx {
+                    if c < d { data[t * d + c] = 0.0; }
+                }
+            }
+            // Constante a propósito: es una intervención de análisis, no una
+            // ruta de gradiente. Nunca se usa entrenando.
+            Tensor::new(data, g.shape.clone())
+        }
+    }
+}
+
 fn alpha_squash(z: &Tensor) -> Tensor {
     if antisat() {
         ops::algebraic_sigmoid(z)
@@ -66,16 +181,27 @@ pub struct ClockMem {
     pub wg: Linear,
     pub log_clock: Tensor,
     pub beta: Tensor,
+    pub wread: Option<Tensor>,
+    pub alpha_read: Option<Tensor>,
+    pub inv_beta: Option<Tensor>,
+    pub gate_z: Option<Tensor>,
+    /// Task #58, low-rank outer-product write: the four rank-r projections
+    /// and the per-slot clock of the matrix state. All Some together or all
+    /// None; created only when EVA_WRITE_LOWRANK=r.
+    pub pk: Option<Tensor>,
+    pub pv: Option<Tensor>,
+    pub pq: Option<Tensor>,
+    pub po: Option<Tensor>,
+    pub log_clock_m: Option<Tensor>,
+    /// SSM baseline: when Some(a), the per-channel clock is REPLACED by this
+    /// fixed alpha (log_clock is then excluded from parameters). See
+    /// `ssm_alpha()`.
+    pub ssm_alpha: Option<f32>,
 }
 
 impl ClockMem {
     pub fn new(d: usize, rng: &mut Rng) -> Self {
-        ClockMem {
-            wq: Linear::new(d, d, rng),
-            wk: Linear::new(d, d, rng),
-            wv: Linear::new(d, d, rng),
-            wg: Linear::new(d, d, rng),
-            log_clock: {
+        let log_clock = {
                 // CLOCK CEILING. With 0.9999 a channel forgets so slowly
                 // that it accumulates ~10,000 terms: harmless within a
                 // 64-token window, but with persistent state across the
@@ -96,22 +222,417 @@ impl ClockMem {
                     })
                     .collect();
                 param(logits, vec![d])
-            },
-            beta: param(vec![1.0], vec![1]),
+            };
+        let beta = param(vec![1.0], vec![1]);
+        // EXPERIMENT (GPT/Dante lead 2026-08-14): windowed clock read.
+        // EVA_READ_WIN=K turns the read into a learned window sum over the
+        // last K states (see ops::clockmem_readwin); unset keeps the
+        // original single-state read q*cur*g. Delta init (w=1 on the
+        // current state) so A/B start identical. Must be set at train AND
+        // eval/load time or the checkpoint's wread is silently skipped.
+        //
+        // B2.1 (structured finite-difference init, env EVA_READ_DF_N=N):
+        // on top of the delta, place the two taps that make the read recover
+        // the WRITE at position t-N+1,
+        //   w[N-1,c] =  1/beta       w[N,c] = -alpha_c/beta
+        // which is the finite difference of the leaky recurrence,
+        //   write[tau,c] = (cur[tau,c] - alpha_c*cur[tau-1,c]) / beta
+        // so read[t] = write[t-N+1] = the embedding of input[t-N+1] = target.
+        // alpha is computed with the SAME alpha_squash the forward uses, so
+        // the recovered write matches the real state dynamics exactly. Taps
+        // outside the window (e.g. K=1, the control) are simply skipped and
+        // the init degrades to plain delta.
+        let df_n = std::env::var("EVA_READ_DF_N")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok());
+        // ORACLE READOUT (GPT lead, after B2.1): EVA_READ_ORACLE=1 with
+        // EVA_READ_WIN=K and EVA_READ_DF_N=N replaces the learned wread with
+        // the MATHEMATICALLY EXACT inverse, recomputed from the current
+        // alpha/beta on every forward (so it stays exact even as alpha is
+        // learned). No wread parameter exists, so nothing is trained; the
+        // question is whether the recoverable write is enough to solve the
+        // masked task end-to-end. With no oracle, the B2.1 learned init applies.
+        let oracle_on = std::env::var("EVA_READ_ORACLE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+            != 0;
+        // CLEAN INJECTION (EVA_READ_INJECT=1): the recovered write goes to
+        // the residual stream directly, without q*g (see ops::clockmem_inject).
+        let inject_on = std::env::var("EVA_READ_INJECT")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+            != 0;
+        // R1 (GPT/Dante lead, 2026-08-15): the windowed read WITHOUT the q*g
+        // gate, with a LEARNED wread (ops::clockmem_readwin_inj). Two inits:
+        //   - R1a: EVA_READ_DF_N=N seeds the finite-difference taps
+        //     (w[N-1]=1/beta, w[N]=-alpha/beta) -- the read starts functional
+        //     and the question is whether the gradient now moves it.
+        //   - R1b: no EVA_READ_DF_N -> all-zero init -- the model must
+        //     discover the long read by itself through the additive path.
+        let r1_on = std::env::var("EVA_READ_R1")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+            != 0;
+        // R1c (GPT/Claude lead, 2026-08-15): the STRUCTURED learnable
+        // inverse. Replaces the free Kxd wread of R1a/R1b with ~2
+        // params/channel in the inverse-leaky-filter family (ops:
+        // `clockmem_inject_learn`): read = inv_beta[c]*(state[t-N+1] -
+        // alpha_read[c]*state[t-N]). We learn inv_beta=1/beta_read directly
+        // (it multiplies), so beta_read can never cross zero and there is no
+        // new singularity. Seeded at the PHYSICAL values (alpha_c, 1/beta)
+        // the family starts exactly at the verified oracle; the free w of R1a
+        // drifted off that point through noisy taps that CANNOT exist here.
+        // EVA_READ_R1C_NEUTRAL=1 seeds alpha_read=0 instead (read=state[t-N+1]).
+        let r1c_on = std::env::var("EVA_READ_R1C")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+            != 0;
+        let r1c_neutral = std::env::var("EVA_READ_R1C_NEUTRAL").is_ok();
+        // R2 (Claude/GPT/Valentín, 2026-08-15): the structured memory path
+        // (same family as R1c) behind a gated scalar that CANNOT annul it.
+        //   out = q*cur*g + s*read,  s = floor + (1-floor)*sigmoid(z)
+        // The floor (EVA_READ_R2_FLOOR, default 0.05) guarantees s >= floor > 0
+        // even if the gate saturates closed, so memory_path keeps contributing
+        // and alpha_read/inv_beta keep receiving REAL gradient (property (2)).
+        // z (EVA_READ_R2_Z0, default 0.0) is a scalar pre-activation per block;
+        // its own gradient is NOT required to work at saturation (property (1)).
+        let r2_on = std::env::var("EVA_READ_R2")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+            != 0;
+        let r2_z0 = std::env::var("EVA_READ_R2_Z0")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(0.0);
+        // R2-channel (GPT order, 2026-08-15): same gate with one z PER CHANNEL
+        // (shape [D]) instead of one scalar per block. GPT's control for "is
+        // the block scalar imposing the inductive bias". The scalar family is
+        // a subset (z constant == block), so the floor guarantee holds per
+        // channel. The distribution of s[c] is traced (EVA_WREAD_TRACE).
+        let r2_channel = std::env::var("EVA_READ_R2_CHANNEL")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+            != 0;
+        let (alpha_read, inv_beta) = if r1c_on || r2_on {
+            let alpha_v = alpha_squash(&Tensor::new(log_clock.data.to_vec(), vec![d]));
+            let ar_data: Vec<f32> = if r1c_neutral {
+                vec![0.0; d]
+            } else {
+                alpha_v.data.to_vec()
+            };
+            let ib_data = vec![1.0 / beta.data[0]; d];
+            (Some(param(ar_data, vec![d])), Some(param(ib_data, vec![d])))
+        } else {
+            (None, None)
+        };
+        let gate_z = if r2_on {
+            if r2_channel {
+                Some(param(vec![r2_z0; d], vec![d]))
+            } else {
+                Some(param(vec![r2_z0], vec![1]))
+            }
+        } else {
+            None
+        };
+        let wread = if r1c_on || r2_on || oracle_on || (inject_on && !r1_on) {
+            None
+        } else {
+            std::env::var("EVA_READ_WIN")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|&k| k > 0)
+                .map(|k| {
+                    let mut data = vec![0.0f32; k * d];
+                    if !r1_on {
+                        for c in 0..d {
+                            data[c] = 1.0;
+                        }
+                    }
+                    if let Some(n) = df_n {
+                        let beta_v = beta.data[0];
+                        // Detached copy: with a requires_grad=false input,
+                        // finalize returns a plain tensor, no graph node leaks.
+                        let alpha = alpha_squash(&Tensor::new(log_clock.data.to_vec(), vec![d]));
+                        if n >= 1 && n - 1 < k {
+                            for c in 0..d {
+                                data[(n - 1) * d + c] = 1.0 / beta_v;
+                            }
+                        }
+                        if n < k {
+                            for c in 0..d {
+                                data[n * d + c] = -alpha.data[c] / beta_v;
+                            }
+                        }
+                    }
+                    param(data, vec![k, d])
+                })
+        };
+        // Task #58: the low-rank write's parameters.
+        //
+        // `po` starts at ZERO on purpose, so the model begins EXACTLY at base
+        // ClockMem and an A/B against `--arch clock` differs in nothing at
+        // step 0 (same reasoning as the delta init of `wread`). It is not a
+        // saturating gate: `po`'s own gradient at zero is healthy
+        // (gpo = rd * grad_out), so it leaves zero on the first step and the
+        // projections start receiving gradient immediately -- this is not the
+        // starvation situation of Section 4.6. EVA_WRITE_LOWRANK_PO_RAND=1
+        // seeds it randomly instead, in case the zero start ever matters.
+        let (pk, pv, pq, po, log_clock_m) = match lowrank_rank() {
+            None => (None, None, None, None, None),
+            Some(r) => {
+                let bound = 1.0 / (d as f32).sqrt();
+                let mk = |rng: &mut Rng| {
+                    param((0..d * r).map(|_| rng.uniform(-bound, bound)).collect(), vec![d, r])
+                };
+                let pk = mk(rng);
+                let pv = mk(rng);
+                let pq = mk(rng);
+                let po_data = if std::env::var("EVA_WRITE_LOWRANK_PO_RAND").is_ok() {
+                    let b = 1.0 / (r as f32).sqrt();
+                    (0..r * d).map(|_| rng.uniform(-b, b)).collect()
+                } else {
+                    vec![0.0f32; r * d]
+                };
+                // The matrix state exists to hold BINDINGS across the gaps of
+                // the associative benchmark (mean ~40 bytes, max ~400 in a
+                // 512-byte window). The main clock's init spreads alpha
+                // geometrically down to 0.01, where a channel forgets in a
+                // single step -- fine for D=512 channels, but with only r
+                // slots it would spend half of them on decay rates that can
+                // hold no binding at all. So the same geometric spread is
+                // used over a deliberately slower range. This is a design
+                // choice, not a measured optimum: both ends are flags.
+                let am_max = std::env::var("EVA_LOWRANK_AM_MAX")
+                    .ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.9999);
+                let am_min = std::env::var("EVA_LOWRANK_AM_MIN")
+                    .ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.9);
+                let logits: Vec<f32> = (0..r)
+                    .map(|i| {
+                        let t = if r == 1 { 0.0 } else { i as f32 / (r - 1) as f32 };
+                        alpha_squash_inv(am_max * (am_min / am_max).powf(t))
+                    })
+                    .collect();
+                (Some(pk), Some(pv), Some(pq), Some(param(po_data, vec![r, d])),
+                 Some(param(logits, vec![r])))
+            }
+        };
+        ClockMem {
+            wq: Linear::new(d, d, rng),
+            wk: Linear::new(d, d, rng),
+            wv: Linear::new(d, d, rng),
+            wg: Linear::new(d, d, rng),
+            log_clock,
+            beta,
+            wread,
+            alpha_read,
+            inv_beta,
+            gate_z,
+            pk,
+            pv,
+            pq,
+            po,
+            log_clock_m,
+            ssm_alpha: ssm_alpha(),
         }
     }
 }
 
 impl ClockMem {
+    /// Physical clock alpha (alpha_squash of log_clock) as a PLAIN tensor
+    /// (detached copy, no graph node): the reference point for comparing
+    /// the learned alpha_read against, and for the df taps.
+    pub(crate) fn alpha_physical(&self) -> Tensor {
+        if let Some(a) = self.ssm_alpha {
+            Tensor::new(vec![a; self.log_clock.shape[0]], vec![self.log_clock.shape[0]])
+        } else {
+            alpha_squash(&Tensor::new(self.log_clock.data.to_vec(), vec![self.log_clock.shape[0]]))
+        }
+    }
+
+    /// ORACLE READOUT: the exact inverse, recomputed from the CURRENT
+    /// alpha/beta every forward so the recovered write always matches the
+    /// real state dynamics even as alpha is learned. Returns None unless
+    /// EVA_READ_ORACLE=1 with EVA_READ_WIN=K and EVA_READ_DF_N=N set.
+    /// w[0,c]=1 (delta, keeps the seed region behaving like base),
+    /// w[N-1,c]=1/beta, w[N,c]=-alpha_c/beta -> read[t]=write[t-N+1].
+    pub(crate) fn oracle_read(&self) -> Option<Tensor> {
+        if std::env::var("EVA_READ_ORACLE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+            == 0
+        {
+            return None;
+        }
+        let k = std::env::var("EVA_READ_WIN")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())?;
+        let n = std::env::var("EVA_READ_DF_N")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())?;
+        if k == 0 || n == 0 {
+            return None;
+        }
+        let d = self.log_clock.shape[0];
+        let beta_v = self.beta.data[0];
+        let alpha = alpha_squash(&Tensor::new(self.log_clock.data.to_vec(), vec![d]));
+        let mut data = vec![0.0f32; k * d];
+        for c in 0..d {
+            data[c] = 1.0;
+        }
+        if n >= 1 && n - 1 < k {
+            for c in 0..d {
+                data[(n - 1) * d + c] = 1.0 / beta_v;
+            }
+        }
+        if n < k {
+            for c in 0..d {
+                data[n * d + c] = -alpha.data[c] / beta_v;
+            }
+        }
+        Some(Tensor::new(data, vec![k, d]))
+    }
+
+    /// Clean-injection mode: returns N when EVA_READ_INJECT=1, else None.
+    fn inject_n(&self) -> Option<usize> {
+        if std::env::var("EVA_READ_INJECT")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+            == 0
+        {
+            return None;
+        }
+        std::env::var("EVA_READ_DF_N").ok().and_then(|v| v.parse::<usize>().ok())
+    }
+
+    /// R1 mode: the learned windowed read without the q*g gate. Returns the
+    /// wread parameter when EVA_READ_R1=1 (requires EVA_READ_WIN=K).
+    fn r1_read(&self) -> Option<&Tensor> {
+        if std::env::var("EVA_READ_R1")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+            == 0
+        {
+            return None;
+        }
+        self.wread.as_ref()
+    }
+
+    /// R1c mode: the structured learnable inverse. Returns (alpha_read,
+    /// inv_beta, N) when EVA_READ_R1C=1 with EVA_READ_DF_N=N set. Requires
+    /// the two per-channel parameters created in `new`.
+    fn r1c_read(&self) -> Option<(&Tensor, &Tensor, usize)> {
+        if std::env::var("EVA_READ_R1C")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+            == 0
+        {
+            return None;
+        }
+        let n = std::env::var("EVA_READ_DF_N").ok().and_then(|v| v.parse::<usize>().ok())?;
+        Some((self.alpha_read.as_ref()?, self.inv_beta.as_ref()?, n))
+    }
+
+    /// R2 mode: the gated structured read. Returns (alpha_read, inv_beta, z,
+    /// floor, N) when EVA_READ_R2=1 with EVA_READ_DF_N=N set.
+    fn r2_read(&self) -> Option<(&Tensor, &Tensor, &Tensor, f32, usize)> {
+        if std::env::var("EVA_READ_R2")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+            == 0
+        {
+            return None;
+        }
+        let n = std::env::var("EVA_READ_DF_N").ok().and_then(|v| v.parse::<usize>().ok())?;
+        let floor = std::env::var("EVA_READ_R2_FLOOR")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(0.05);
+        Some((self.alpha_read.as_ref()?, self.inv_beta.as_ref()?, self.gate_z.as_ref()?, floor, n))
+    }
+
+    /// Task #58: the low-rank write's five tensors, all-or-nothing.
+    fn lowrank_parts(&self) -> Option<(&Tensor, &Tensor, &Tensor, &Tensor, &Tensor)> {
+        Some((
+            self.pk.as_ref()?,
+            self.pv.as_ref()?,
+            self.pq.as_ref()?,
+            self.po.as_ref()?,
+            self.log_clock_m.as_ref()?,
+        ))
+    }
+
+    /// R2 dispatch: z [1] -> scalar block gate, z [D] -> per-channel gate.
+    /// The channel family contains the scalar one (z constant == block).
+    fn r2_call(&self, q: &Tensor, k: &Tensor, v: &Tensor, g: &Tensor, alpha: &Tensor, s0: &[f32]) -> (Tensor, Vec<f32>) {
+        let (ar, ib, z, floor, nn) = self.r2_read().expect("r2_call without R2");
+        if z.shape == vec![q.shape[1]] {
+            ops::clockmem_inject_learn_gc(q, k, v, g, alpha, &self.beta, ar, ib, z, floor, nn, s0)
+        } else {
+            ops::clockmem_inject_learn_g(q, k, v, g, alpha, &self.beta, ar, ib, z, floor, nn, s0)
+        }
+    }
+
     /// Same as `forward`, starting from the state the previous window left
     /// behind and returning the one left for the next.
     pub fn forward_from(&self, x: &Tensor, s0: &[f32]) -> (Tensor, Vec<f32>) {
         let q = self.wq.forward(x);
         let k = self.wk.forward(x);
         let v = self.wv.forward(x);
-        let g = ops::sigmoid(&self.wg.forward(x));
-        let alpha = alpha_squash(&self.log_clock);
-        ops::clockmem_from(&q, &k, &v, &g, &alpha, &self.beta, s0)
+        let g = if no_gate() {
+            Tensor::new(vec![1.0; x.shape[0] * x.shape[1]], x.shape.clone())
+        } else {
+            ops::sigmoid(&self.wg.forward(x))
+        };
+        let g = apply_read_mask(g);
+        let alpha = match self.ssm_alpha {
+            Some(a) => Tensor::new(vec![a; q.shape[1]], vec![q.shape[1]]),
+            None => alpha_squash(&self.log_clock),
+        };
+        match self.r2_read() {
+            Some(_) => self.r2_call(&q, &k, &v, &g, &alpha, s0),
+            None => match self.r1c_read() {
+                Some((ar, ib, nn)) => {
+                    ops::clockmem_inject_learn(&q, &k, &v, &g, &alpha, &self.beta, ar, ib, nn, s0)
+                }
+                None => match self.r1_read() {
+                    Some(w) => ops::clockmem_readwin_inj(&q, &k, &v, &g, &alpha, &self.beta, w, s0),
+                    None => match self.inject_n() {
+                        Some(n) => ops::clockmem_inject(&q, &k, &v, &g, &alpha, &self.beta, n, s0),
+                        None => match self.oracle_read() {
+                            Some(w) => ops::clockmem_readwin(&q, &k, &v, &g, &alpha, &self.beta, &w, s0),
+                            None => match &self.wread {
+                                Some(w) => ops::clockmem_readwin(&q, &k, &v, &g, &alpha, &self.beta, w, s0),
+                                None => match self.lowrank_parts() {
+                                    Some((pk, pv, pq, po, lcm)) => {
+                                        let am = alpha_squash(lcm);
+                                        ops::clockmem_lowrank_from(
+                                            &q, &k, &v, &g, &alpha, &self.beta, pk, pv, pq, po, &am, s0,
+                                        )
+                                    }
+                                    None => match write_error_gate() {
+                                        Some((p, trace)) => {
+                                            ops::clockmem_gated_from(&q, &k, &v, &g, &alpha, &self.beta, p, s0, trace)
+                                        }
+                                        None => ops::clockmem_from(&q, &k, &v, &g, &alpha, &self.beta, s0),
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        }
     }
 }
 
@@ -120,9 +641,50 @@ impl Module for ClockMem {
         let q = self.wq.forward(x);
         let k = self.wk.forward(x);
         let v = self.wv.forward(x);
-        let g = ops::sigmoid(&self.wg.forward(x));
-        let alpha = alpha_squash(&self.log_clock);
-        ops::clockmem(&q, &k, &v, &g, &alpha, &self.beta)
+        let g = if no_gate() {
+            Tensor::new(vec![1.0; x.shape[0] * x.shape[1]], x.shape.clone())
+        } else {
+            ops::sigmoid(&self.wg.forward(x))
+        };
+        let g = apply_read_mask(g);
+        let alpha = match self.ssm_alpha {
+            Some(a) => Tensor::new(vec![a; q.shape[1]], vec![q.shape[1]]),
+            None => alpha_squash(&self.log_clock),
+        };
+        let s0 = vec![0.0; q.shape[1]];
+        match self.r2_read() {
+            Some(_) => self.r2_call(&q, &k, &v, &g, &alpha, &s0).0,
+            None => match self.r1c_read() {
+                Some((ar, ib, nn)) => ops::clockmem_inject_learn(&q, &k, &v, &g, &alpha, &self.beta, ar, ib, nn, &s0).0,
+                None => match self.r1_read() {
+                    Some(w) => ops::clockmem_readwin_inj(&q, &k, &v, &g, &alpha, &self.beta, w, &s0).0,
+                    None => match self.inject_n() {
+                        Some(n) => ops::clockmem_inject(&q, &k, &v, &g, &alpha, &self.beta, n, &s0).0,
+                        None => match self.oracle_read() {
+                            Some(w) => ops::clockmem_readwin(&q, &k, &v, &g, &alpha, &self.beta, &w, &s0).0,
+                            None => match &self.wread {
+                                Some(w) => ops::clockmem_readwin(&q, &k, &v, &g, &alpha, &self.beta, w, &s0).0,
+                                None => match self.lowrank_parts() {
+                                    Some((pk, pv, pq, po, lcm)) => {
+                                        let am = alpha_squash(lcm);
+                                        ops::clockmem_lowrank_from(
+                                            &q, &k, &v, &g, &alpha, &self.beta, pk, pv, pq, po, &am, &s0,
+                                        )
+                                        .0
+                                    }
+                                    None => match write_error_gate() {
+                                        Some((p, trace)) => {
+                                            ops::clockmem_gated_from(&q, &k, &v, &g, &alpha, &self.beta, p, &s0, trace).0
+                                        }
+                                        None => ops::clockmem(&q, &k, &v, &g, &alpha, &self.beta),
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        }
     }
 
     fn parameters(&self) -> Vec<&Tensor> {
@@ -131,8 +693,17 @@ impl Module for ClockMem {
         out.extend(self.wk.parameters());
         out.extend(self.wv.parameters());
         out.extend(self.wg.parameters());
-        out.push(&self.log_clock);
+        if self.ssm_alpha.is_none() { out.push(&self.log_clock); }
         out.push(&self.beta);
+        if let Some(w) = &self.wread { out.push(w); }
+        if let Some(a) = &self.alpha_read { out.push(a); }
+        if let Some(b) = &self.inv_beta { out.push(b); }
+        if let Some(z) = &self.gate_z { out.push(z); }
+        if let Some(t) = &self.pk { out.push(t); }
+        if let Some(t) = &self.pv { out.push(t); }
+        if let Some(t) = &self.pq { out.push(t); }
+        if let Some(t) = &self.po { out.push(t); }
+        if let Some(t) = &self.log_clock_m { out.push(t); }
         out
     }
 
@@ -142,8 +713,17 @@ impl Module for ClockMem {
         out.extend(self.wk.parameters_mut());
         out.extend(self.wv.parameters_mut());
         out.extend(self.wg.parameters_mut());
-        out.push(&mut self.log_clock);
+        if self.ssm_alpha.is_none() { out.push(&mut self.log_clock); }
         out.push(&mut self.beta);
+        if let Some(w) = &mut self.wread { out.push(w); }
+        if let Some(a) = &mut self.alpha_read { out.push(a); }
+        if let Some(b) = &mut self.inv_beta { out.push(b); }
+        if let Some(z) = &mut self.gate_z { out.push(z); }
+        if let Some(t) = &mut self.pk { out.push(t); }
+        if let Some(t) = &mut self.pv { out.push(t); }
+        if let Some(t) = &mut self.pq { out.push(t); }
+        if let Some(t) = &mut self.po { out.push(t); }
+        if let Some(t) = &mut self.log_clock_m { out.push(t); }
         out
     }
 
@@ -153,8 +733,17 @@ impl Module for ClockMem {
         out.extend(self.wk.named_parameters(&format!("{}.wk", prefix)));
         out.extend(self.wv.named_parameters(&format!("{}.wv", prefix)));
         out.extend(self.wg.named_parameters(&format!("{}.wg", prefix)));
-        out.push((format!("{}.log_clock", prefix), &self.log_clock));
+        if self.ssm_alpha.is_none() { out.push((format!("{}.log_clock", prefix), &self.log_clock)); }
         out.push((format!("{}.beta", prefix), &self.beta));
+        if let Some(w) = &self.wread { out.push((format!("{}.wread", prefix), w)); }
+        if let Some(a) = &self.alpha_read { out.push((format!("{}.alpha_read", prefix), a)); }
+        if let Some(b) = &self.inv_beta { out.push((format!("{}.inv_beta", prefix), b)); }
+        if let Some(z) = &self.gate_z { out.push((format!("{}.gate_z", prefix), z)); }
+        if let Some(t) = &self.pk { out.push((format!("{}.pk", prefix), t)); }
+        if let Some(t) = &self.pv { out.push((format!("{}.pv", prefix), t)); }
+        if let Some(t) = &self.pq { out.push((format!("{}.pq", prefix), t)); }
+        if let Some(t) = &self.po { out.push((format!("{}.po", prefix), t)); }
+        if let Some(t) = &self.log_clock_m { out.push((format!("{}.log_clock_m", prefix), t)); }
         out
     }
 
@@ -164,8 +753,17 @@ impl Module for ClockMem {
         out.extend(self.wk.named_parameters_mut(&format!("{}.wk", prefix)));
         out.extend(self.wv.named_parameters_mut(&format!("{}.wv", prefix)));
         out.extend(self.wg.named_parameters_mut(&format!("{}.wg", prefix)));
-        out.push((format!("{}.log_clock", prefix), &mut self.log_clock));
+        if self.ssm_alpha.is_none() { out.push((format!("{}.log_clock", prefix), &mut self.log_clock)); }
         out.push((format!("{}.beta", prefix), &mut self.beta));
+        if let Some(w) = &mut self.wread { out.push((format!("{}.wread", prefix), w)); }
+        if let Some(a) = &mut self.alpha_read { out.push((format!("{}.alpha_read", prefix), a)); }
+        if let Some(b) = &mut self.inv_beta { out.push((format!("{}.inv_beta", prefix), b)); }
+        if let Some(z) = &mut self.gate_z { out.push((format!("{}.gate_z", prefix), z)); }
+        if let Some(t) = &mut self.pk { out.push((format!("{}.pk", prefix), t)); }
+        if let Some(t) = &mut self.pv { out.push((format!("{}.pv", prefix), t)); }
+        if let Some(t) = &mut self.pq { out.push((format!("{}.pq", prefix), t)); }
+        if let Some(t) = &mut self.po { out.push((format!("{}.po", prefix), t)); }
+        if let Some(t) = &mut self.log_clock_m { out.push((format!("{}.log_clock_m", prefix), t)); }
         out
     }
 }

@@ -29,6 +29,29 @@ allá de donde hoy se muere, no sólo que la profundiza donde ya funciona.
 **Negativo** = ninguno de los dos. En ese caso #58 queda medido y cerrado, y
 no se re-litiga sin un número nuevo (regla 4).
 
+## Diseño ESCALONADO (24-08, por objeción de Valentín: 8 h es mucho)
+
+Reglas de parada fijadas ANTES de correr. Caso probable: 1 o 4 horas.
+
+**Etapa 0 — 1 semilla, ~1 h.** No mira Δlnp: mira con `lowrank_probe` si
+`M` SE USA. `po` arranca en cero exacto, así que su norma es la lectura más
+limpia de si la vía nueva está viva o quedó de adorno.
+→ si `M` está inerte, **se corta acá**: #58 medido y cerrado. Resultado
+válido y publicable: "en texto real el gradiente no usa la vía nueva".
+
+**Etapa 1 — 3 semillas más (n=4), ~3 h.** Sólo si la vía está viva.
+→ positivo o claramente negativo: se corta acá.
+
+**Etapa 2 — 4 semillas más (n=8), ~4 h.** Sólo si queda en el borde.
+
+Bajar de 8 a 4 cuesta poco porque la base no se mueve:
+
+```
+  bucket     n=4 umbral    n=6 umbral    n=8 umbral
+  128-256      -0,294        -0,276        -0,267
+  256-512      -0,128        -0,114        -0,106
+```
+
 ## Diseño
 
 - 8 semillas (las mismas 7, 21-27) con `EVA_WRITE_LOWRANK=32`

@@ -11,10 +11,26 @@
 //! Metric per (entity, distance bucket), measured at the entity's FIRST byte:
 //!   n        : occurrences measured
 //!   top1/top5: % where the correct next byte is in the model's top-k
-//!   mean_lnp : mean log-prob (nats) of the correct byte
+//!   mean_lnp : mean SURPRISAL (nats) of the correct byte -- this is
+//!              `-log p`, computed below as
+//!              `-((row[first_byte] - m) - ln(esum))`. **LOWER IS BETTER.**
+//!              The name is a historical misnomer kept for log compatibility:
+//!              it is a negative log-probability, not a log-probability.
 //!   Δlnp     : mean_lnp of this bucket minus the same entity's reference
-//!              (nowin in no-carry mode, cold in carry mode). Positive = the
-//!              prior occurrence in memory helped -> the retrieval signal.
+//!              (nowin in no-carry mode, cold in carry mode).
+//!              **NEGATIVE = the prior occurrence in memory HELPED** (less
+//!              surprised than with no memory available) -> retrieval signal.
+//!              Positive = worse than having no memory at all.
+//!
+//!              SIGN CORRECTION (2026-08-25): this header previously said
+//!              "Positive = ... helped", which is backwards for a surprisal.
+//!              PAPER-DRAFT.md 4.8 inherited that error and reported the
+//!              real-text retrieval result with its conclusion inverted. The
+//!              sign is settled by two quantities in the same table that do
+//!              not depend on it: at 32<d<=128 the model scores top1 50.00%
+//!              and rank 6.9 against a no-memory reference of 34.94% / 9.8,
+//!              i.e. it is BETTER there -- and that is the bucket whose Δlnp
+//!              is -0.829. Negative Δlnp means better.
 //!   rank     : mean rank of the correct byte
 //!   name_bpb : per-byte bpb over the whole entity (secondary; mixes short
 //!              range once the first byte is right)
@@ -200,9 +216,12 @@ fn main() {
     }
 
     println!("\nnotes:");
-    println!("  - mean_lnp/rank are measured on the entity's FIRST byte.");
-    println!("  - Δlnp vs '{}': positive means the model puts MORE probability on", buckets[ref_idx].label);
-    println!("    the entity's byte when it saw the entity before at that distance.");
+    println!("  - mean_lnp is SURPRISAL (-log p), measured on the entity's FIRST byte.");
+    println!("    LOWER IS BETTER. (The name is a historical misnomer.)");
+    println!("  - Δlnp vs '{}': NEGATIVE means the model is LESS surprised by", buckets[ref_idx].label);
+    println!("    the entity's byte when it saw the entity before at that distance,");
+    println!("    i.e. negative = memory helped. Cross-check with top1% and rank,");
+    println!("    which do not depend on this sign.");
     println!("  - {} mode has no 'outside window' reference: long-distance buckets are", if carry { "carry" } else { "no-carry" });
     println!("    the decay curve themselves (and 'cold' the no-memory extreme).");
     if !carry {

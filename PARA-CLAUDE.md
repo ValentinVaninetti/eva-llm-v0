@@ -3,7 +3,7 @@
 Handoff de Claude para Claude. No está fechado a propósito: es el documento
 vivo de "dónde estamos". Actualizarlo al cerrar cada ronda.
 
-**Última actualización: 2026-08-20 08:10, compuerta descartada; queda la inicialización.**
+**Última actualización: 2026-08-24, debate filosófico memoria/comprensión; dos caminos propuestos (--persist y T=1.3).**
 
 ---
 
@@ -308,3 +308,126 @@ Después va `dim=1024, k=8` (~22 h). Comando y razonamiento completos en
 - **#36** — ¿el costo del crédito local crece con la profundidad?
 - **#28** — reserva DHCP para Martha en el router (ya se le movió la IP una
   vez, a `.184`; si se mueve de nuevo se rompen los scripts).
+
+---
+
+## Conversación 24-08: Filosofía, memoria sin entendimiento, y giro de rumbo
+
+### Contexto
+
+Claude mandó el CONSEJO-2026-08-24.md (cierre de ronda, 7 partes, 9
+preguntas). Valentín mandó a GPT el documento. GPT respondió con un plan
+operativo. Dante verificó los números (regla 6). Después arrancó un debate
+filosófico entre Valentín y Dante, con aportes de Claude.
+
+### Verificación de números (Dante)
+
+Todos los números verificables contra logs crudos son exactos:
+- Lottery 5 seeds: bpb idénticos al 4to decimal ✓
+- Width sweep (dim256/k2, dim256/k4, dim512/k2, dim512/k4): ✓
+- Quijote 8 seeds: bpb ✓
+- Entidades 8 seeds: Δlnp las 32 celdas ✓
+- Binary verification r3 vs r2: ✓
+
+No verificable: ablación de compuerta (BASE 2/17, NOGATE 0/12) — no hay
+logs de query_swap ni eval_associative para los checkpoints cortos en
+Martha. Pendiente de auditoría, no bloqueante.
+
+### La idea de Valentín (núcleo del debate)
+
+"La memoria sin entendimiento es un buffer, no una memoria."
+
+Valentín propuso: en vez de intentar generar memoria por relación
+(CLAVE→VALOR como tabla SQL), hay que lograr que el modelo primero tenga
+comprensión, y recién después utilizar memoria persistente para ver si
+aprovecha esa capa de comprensión.
+
+Traducido a arquitectura: la comprensión vive en los pesos (memoria
+semántica consolidada); el estado de ClockMem es memoria de trabajo.
+Estuvimos midiendo la memoria de trabajo de un modelo que no tiene nada
+consolidado que sostener.
+
+### Punto clave de Valentín sobre la compuerta de escritura
+
+ClockMem escribe TODO al estado sin preguntar si importa:
+`cur[c] = α·cur[c] + β·k·v`. No filtra. Un buffer.
+
+La propuesta: una compuerta de ESCRITURA que dependa del contenido,
+para que el modelo decida QUÉ guardar:
+```
+should_write = σ(Wwrite · x)
+cur[c] = α[c]·cur[c] + should_write · β·k[t,c]·v[t,c]
+```
+Eso es O(S·D), no O(S²). Y la compuerta de escritura ES la capa de
+comprensión: para decidir si algo importa, hay que procesar el contenido.
+
+### Respuesta de Dante (refutaciones)
+
+1. **La regla de 20 tokens/param no aplica así**: es de transformers
+   grandes para generalización. Un modelo chico puede memorizar con pocos
+   tokens. El problema es optimización, no capacidad.
+
+2. **Separares comprensión y memoria es hipótesis, no hecho**: un bebé no
+   primero entiende y después recuerda. Son co-evolutivas. Entrenar sin
+   memoria y después agregarla pone al modelo fuera de distribución.
+
+3. **dim=48 puede ser demasiado chico**: si el umbral mínimo para
+   comprensión de frase es dim=64 o dim=128, dim=48 nunca lo muestra.
+
+4. **--persist no es solo prender un flag**: cambia orden de ventanas,
+   propagación del estado, distribución de entrenamiento. Es otro régimen.
+
+5. **La hipótesis original sigue viva**: el experimento B (N vs N/2 +
+   búsqueda) la testea, no la da por muerta.
+
+### El hallazgo del día (Claude)
+
+La cantidad de canales con memoria es siempre ~2% de dim, en cualquier
+corpus. No se gana memoria poniendo más ancho: se gana el 2% de lo que
+pongás. Eso es la firma de la trampa de saturación de la §3.
+
+Espectro de alfas medido:
+```
+dim=512 QUIJOTE   501 rápidos (98%)  10 medios  1 muy lento  → 11 con memoria
+dim=512 SINTÉTICO 502 rápidos (98%)   9 medios  1 muy lento  → 10
+dim=48  QUIJOTE    47 rápidos (98%)   0 medios  1 muy lento  →  1
+```
+
+La palanca NO es dim: es arreglar la trampa de saturación.
+
+### Confirmación de Dante (dim=48)
+
+Claude entrenó dim=48 en el Quijote (170 s, 143K params, 2.182 bpb):
+- dim=48: fonotáctica correcta pero palabras inventadas ("legras",
+  "desberlla", "padrerla"). No tiene léxico.
+- dim=512: dice "Sancho", "el rucio", "cautiva", "encomendar".
+
+dim=48 no existe como peldaño. No se puede preguntar por comprensión a
+algo que todavía no tiene palabras.
+
+### La propuesta de Claude (T=1.3)
+
+La §3 del paper tiene un candidato archivado: temperatura T=1.3 en la
+inicialización de alfas. Se descartó midiendo con bpb global, que es
+ciego a efectos de memoria (0.006 bpb = 7.6 puntos de vínculo). Ahora
+tenemos Δlnp con n=8. Volver a medir T=1.3 contra esa base es barato,
+está motivado mecánicamente, y sería la primera intervención (no otro
+diagnóstico).
+
+### Los dos caminos sobre la mesa
+
+1. **--persist desde el arranque** (idea de Valentín/Dante): entrenar con
+   texto continuo, estado propagado. Los pesos aprenden a usar memoria
+   mientras se forman. Prueba si el mecanismo puede aprender con memoria
+   desde el vamos.
+
+2. **T=1.3** (idea de Claude): atacar la trampa de saturación que limita
+   el 2% de canales con memoria. Barato, una constante.
+
+### Pendientes de Dante
+
+- Verificar ablación de compuerta (BASE 2/17, NOGATE 0/12) — compilar
+  eval_associative en Martha, correr sobre 24 checkpoints. No bloqueante.
+- §4.7 del PAPER-DRAFT dice espectro ≈34% rápido / ≈39% medio / ≈26%
+  lento para Quijote T=1. Claude mide 98/2/0. Alguna de las dos está
+  mal o las bandas se definen distinto.

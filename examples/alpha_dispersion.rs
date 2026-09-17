@@ -19,6 +19,8 @@ use eva_llm_v0::model::block::Mixer;
 use eva_llm_v0::save::load_model;
 
 fn main() {
+    let temp: f32 = std::env::var("EVA_ALPHA_TEMP")
+        .ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
     let weights = std::env::args().nth(1).unwrap_or_else(|| "16m5b_seed7.weights".into());
     let model = load_model(&weights).expect("could not load the checkpoint");
 
@@ -34,6 +36,13 @@ fn main() {
         // algebraic_sigmoid instead of sigmoid (Round 4, GPT's hypothesis).
         let antisat = std::env::var("EVA_ALPHA_ANTISAT").is_ok();
         let alphas: Vec<f32> = clock.log_clock.data.iter().map(|&lc| {
+            // BUG ARREGLADO (2026-08-24): esta sonda ignoraba EVA_ALPHA_TEMP y
+            // reportaba sigmoid(z) sobre modelos que usan sigmoid(z/T). O sea
+            // que toda lectura de alfas sobre un checkpoint con temperatura
+            // estaba mostrando valores que el modelo NO usa. Detectado con un
+            // control: leer el mismo checkpoint con y sin la variable daba
+            // idéntico, cuando tenía que dar distinto.
+            let lc = lc / temp;
             if antisat { 0.5 * (1.0 + lc / (1.0 + lc * lc).sqrt()) } else { 1.0 / (1.0 + (-lc).exp()) }
         }).collect();
         let mut sorted = alphas.clone();

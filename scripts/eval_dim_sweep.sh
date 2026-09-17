@@ -1,21 +1,21 @@
 #!/bin/bash
-# Las cuatro celdas del barrido de canales por clave.
+# The four cells of the channels-per-key sweep.
 #
-# La cuenta bajo prueba: lo que gobierna el vinculo NO es la cantidad de
-# claves sino los CANALES POR CLAVE (dim/claves). Si es cierta, las celdas
-# con el mismo cociente tienen que dar parecido, aunque tengan distinto dim
+# Claim under test: what governs the binding is NOT the number of
+# keys but the CHANNELS PER KEY (dim/keys). If true, cells with the
+# same ratio must behave alike even at different dim
 # y distinta cantidad de claves.
 #
 #   dim 512 / k=2  -> 256 can/clave -> 99,65%  (ya medido)
-#   dim 512 / k=4  -> 128 can/clave -> ?       (corrida de esta noche)
+#   dim 512 / k=4  -> 128 can/clave -> ?       (run de esta noche)
 #   dim 512 / k=8  ->  64 can/clave -> 23,42%  (ya medido)
-#   dim 256 / k=2  -> 128 can/clave -> ?       tiene que dar como 512/k=4
-#   dim 256 / k=4  ->  64 can/clave -> ?       tiene que dar como 512/k=8
+#   dim 256 / k=2  -> 128 can/clave -> ?       must match 512/k=4
+#   dim 256 / k=4  ->  64 can/clave -> ?       must match 512/k=8
 #
-# Corre en Cristina: evaluacion, no corrida comparable. EVA_GPU=1 medido en
-# 9 s contra 32 s por 30 ventanas; es solo forward, no cambia ningun numero.
+# Runs on Cristina: evaluacion, no run comparable. EVA_GPU=1 medido en
+# 9 s against 32 s per 30 windows; forward only, changes no number.
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 ev () {
   local ckpt=$1 data=$2 label=$3

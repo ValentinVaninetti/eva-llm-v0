@@ -2,7 +2,7 @@
 # R1 ladder (2026-08-15): inject replica + R1a (df-seeded) + R1b (zero init).
 # Sequential on the GTX 1650. Logs to logs/, checkpoints to the repo root.
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 DATA=data/sintetico_N256_seq512_win1000_seed4245.dat
 ARGS=(--data "$DATA" --dim 512 --ffn 1024 --blocks 5 --seq 512 --val 0.1 --seed 7 --gate-beta 0.0 --log 250 --epochs 2)
 BASE=(EVA_GPU=1 EVA_ALPHA_TRACE=250)

@@ -1,11 +1,11 @@
 #!/bin/bash
-# CONDICION B2.1 (init estructurado con la diferencia finita + LR separado).
-# Sobre la condicion B (EVA_READ_WIN=K=N+1) agregamos:
-#   EVA_READ_DF_N=N   -> w[N-1]=1/beta, w[N]=-alpha_c/beta (readout nace
-#                        expresando la escritura recuperada en t-N+1)
-#   EVA_READ_LR=10    -> LR x10 SOLO para los parametros wread
-# Receta por lo demas identica a la base. K=1 (control sin ventana) == base.
-cd /home/valentin/Escritorio/eva-llm-v0
+# CONDITION B2.1 (structured init from the finite difference + separate LR).
+# On top of condition B (EVA_READ_WIN=K=N+1) we add:
+#   EVA_READ_DF_N=N   -> w[N-1]=1/beta, w[N]=-alpha_c/beta (readout starts
+#                        expressing the recovered write at t-N+1)
+#   EVA_READ_LR=10    -> LR x10 ONLY for the wread parameters
+# Recipe otherwise identical to the base. K=1 (no-window control) == base.
+cd "$(dirname "$0")/.."
 N256(){
   EVA_GPU=1 EVA_ALPHA_TRACE=250 EVA_READ_WIN=257 EVA_READ_DF_N=256 EVA_READ_LR=10 \
   target/release/eva_llm_v0 train --data data/sintetico_N256_seq512_win1000_seed4245.dat \

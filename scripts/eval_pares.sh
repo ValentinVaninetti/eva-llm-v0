@@ -1,7 +1,7 @@
 #!/bin/bash
-# Evalua todos los pares base/nogate que haya terminado la cola corta.
-# Trae los checkpoints que falten y saca el veredicto de cada uno.
-cd "$(dirname "$0")"
+# Evaluatestes every base/nogate pair the short queue has finished.
+# Fetches any missing checkpoints and reports a verdict for each.
+cd "$(dirname "$0")/.."
 mkdir -p snaps
 DATA=data/assoc_k2_seq512_win22500_seed42.dat
 printf "%-6s  %-22s  %-22s\n" "seed" "BASE" "NO-GATE"
@@ -18,7 +18,7 @@ for S in 12 13 14 15 16 17 18 19 20 21 22 23; do
     d=$(EVA_GPU=1 ./target/release/examples/query_swap "$f" "$DATA" 60 3 2>/dev/null | grep -oE "directional shift [+-][0-9.]+" | grep -oE "[+-][0-9.]+")
     if [ -z "$d" ]; then linea="$linea  $(printf '%-22s' '-')"; continue; fi
     # Umbral: los ciegos medidos dan |d| < 0.01; los videntes, > 0.19.
-    # No hay nada en el medio en ninguna corrida hasta ahora.
+    # No hay nada en el medio en ninguna run hasta ahora.
     if awk -v x="$d" 'BEGIN{exit !(x>0.05)}'; then
       v="LEE  ($d)"
       [ "$arm" = base ] && nb=$((nb+1)) || nn=$((nn+1))
@@ -31,6 +31,6 @@ for S in 12 13 14 15 16 17 18 19 20 21 22 23; do
   [ -n "$linea" ] && printf "%-6s%s\n" "$S" "$linea"
 done
 echo
-echo "  BASE   (corridas cortas): $nb de $tb"
-echo "  NOGATE (corridas cortas): $nn de $tn"
-echo "  + base historica (corridas completas, seeds 7-11): 1 de 5"
+echo "  BASE   (runs cortas): $nb de $tb"
+echo "  NOGATE (runs cortas): $nn de $tn"
+echo "  + base historica (runs completas, seeds 7-11): 1 de 5"

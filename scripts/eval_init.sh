@@ -1,9 +1,9 @@
 #!/bin/bash
-# Evalua el barrido de 12 INICIALIZACIONES (orden de datos fijo, --seed 7).
-# Mide D en el paso 2500 y 5000: la tasa binaria + la curva que pidio GPT
-# (progreso subcritico vs dos regimenes separados) y el chequeo que pidio
-# Dante (si la bifurcacion se corre en el tiempo al variar init, se ve aca).
-cd "$(dirname "$0")"
+# Evaluatestes the 12-INITIALISATION sweep (data order fixed, --seed 7).
+# Measures D at steps 2500 and 5000: the binary rate plus the curve
+# (subcritical progress vs two separate regimes) and the check asked for:
+# whether the bifurcation shifts in time when init varies shows up here.
+cd "$(dirname "$0")/.."
 D=data/assoc_k2_seq512_win22500_seed42.dat
 printf "%-8s  %-12s  %-12s  %s\n" "init" "D@2500" "D@5000" "veredicto"
 printf "%-8s  %-12s  %-12s  %s\n" "----" "------" "------" "---------"

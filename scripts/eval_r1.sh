@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Eval the R1 ladder checkpoints with the SAME env they were trained with.
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 DATA=data/sintetico_N256_seq512_win1000_seed4245.dat
 BIN=target/release/examples/mask_eval
 

@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Entity retrieval benchmark on the Quijote (GPT directive, 2026-08-15).
 # 4 combos: {T1, T13} x {independent, carry}, each val+train.
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 export EVA_GPU=1
 run() { # $1=label $2=weights $3=temp $4=carry
   local label=$1 w=$2 t=$3 carry=$4

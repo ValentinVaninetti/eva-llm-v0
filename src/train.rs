@@ -251,23 +251,6 @@ impl WreadTrace {
 
 // Round 3, final benchmark: the gate as a training regularizer, recipe
 // consolidated by Dante -- "teach where the table is deterministic, don't
-// touch where nobody wins." Unlike `mixed_ce` (which mixed the table into
-// the TARGET and died measured, monotonically negative), this adds a
-// CONSTANT bias (no gradient of its own, `Tensor::new` doesn't request
-// grad) to the logits BEFORE the softmax -- kNN-LM-at-eval carried over to
-// training, with the real gradient flowing back to the model through `add`
-// (backward of a sum = identity on both operands, but only `logits` has a
-// graph).
-//
-// Gated by DETERMINISM (Shannon H of the table), not by the model's
-// confidence (`p[argmax]`) like eval's gate -- unlike eval, here we need a
-// signal available from the very first step, when the model still says
-// nothing useful. H_HIGH=2.0 is a reading of the bands already measured
-// today (c=2: 0.43 bits, 3-9: 0.87, 10-49: 1.47, 50+: 2.16) -- the 50+ band
-// (unsolvable, nobody beats it) lands near gate≈0, the c=2 band (nearly
-// deterministic) near gate≈1. Explicit interpretation so it can be
-// corrected if this isn't the intent: not swept against val, chosen by
-// direct reading of an already-published number, not by tuning.
 const GATE_CAP: f32 = 7.7; // same cap Seneca used in adaptive_lambda.rs
 const GATE_H_HIGH: f32 = 2.0;
 const GATE_EPS: f32 = 1e-9;

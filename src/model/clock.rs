@@ -226,22 +226,6 @@ impl ClockMem {
         let beta = param(vec![1.0], vec![1]);
         // EXPERIMENT (GPT/Dante lead 2026-08-14): windowed clock read.
         // EVA_READ_WIN=K turns the read into a learned window sum over the
-        // last K states (see ops::clockmem_readwin); unset keeps the
-        // original single-state read q*cur*g. Delta init (w=1 on the
-        // current state) so A/B start identical. Must be set at train AND
-        // eval/load time or the checkpoint's wread is silently skipped.
-        //
-        // B2.1 (structured finite-difference init, env EVA_READ_DF_N=N):
-        // on top of the delta, place the two taps that make the read recover
-        // the WRITE at position t-N+1,
-        //   w[N-1,c] =  1/beta       w[N,c] = -alpha_c/beta
-        // which is the finite difference of the leaky recurrence,
-        //   write[tau,c] = (cur[tau,c] - alpha_c*cur[tau-1,c]) / beta
-        // so read[t] = write[t-N+1] = the embedding of input[t-N+1] = target.
-        // alpha is computed with the SAME alpha_squash the forward uses, so
-        // the recovered write matches the real state dynamics exactly. Taps
-        // outside the window (e.g. K=1, the control) are simply skipped and
-        // the init degrades to plain delta.
         let df_n = std::env::var("EVA_READ_DF_N")
             .ok()
             .and_then(|v| v.parse::<usize>().ok());
@@ -278,14 +262,6 @@ impl ClockMem {
             != 0;
         // R1c (GPT/Claude lead, 2026-08-15): the STRUCTURED learnable
         // inverse. Replaces the free Kxd wread of R1a/R1b with ~2
-        // params/channel in the inverse-leaky-filter family (ops:
-        // `clockmem_inject_learn`): read = inv_beta[c]*(state[t-N+1] -
-        // alpha_read[c]*state[t-N]). We learn inv_beta=1/beta_read directly
-        // (it multiplies), so beta_read can never cross zero and there is no
-        // new singularity. Seeded at the PHYSICAL values (alpha_c, 1/beta)
-        // the family starts exactly at the verified oracle; the free w of R1a
-        // drifted off that point through noisy taps that CANNOT exist here.
-        // EVA_READ_R1C_NEUTRAL=1 seeds alpha_read=0 instead (read=state[t-N+1]).
         let r1c_on = std::env::var("EVA_READ_R1C")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
@@ -375,14 +351,6 @@ impl ClockMem {
         };
         // Task #58: the low-rank write's parameters.
         //
-        // `po` starts at ZERO on purpose, so the model begins EXACTLY at base
-        // ClockMem and an A/B against `--arch clock` differs in nothing at
-        // step 0 (same reasoning as the delta init of `wread`). It is not a
-        // saturating gate: `po`'s own gradient at zero is healthy
-        // (gpo = rd * grad_out), so it leaves zero on the first step and the
-        // projections start receiving gradient immediately -- this is not the
-        // starvation situation of Section 4.6. EVA_WRITE_LOWRANK_PO_RAND=1
-        // seeds it randomly instead, in case the zero start ever matters.
         let (pk, pv, pq, po, log_clock_m) = match lowrank_rank() {
             None => (None, None, None, None, None),
             Some(r) => {

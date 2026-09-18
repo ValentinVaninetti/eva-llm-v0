@@ -67,16 +67,34 @@ what evidence, is part of the record.
 
 ```sh
 cargo build --release
-cargo test --release              # 86 tests
+cargo test --release              # 87 tests
 
-./target/release/eva_llm_v0 train --data data/quijote.txt --steps 4000
-./target/release/eva_llm_v0 gen   --weights out.weights --prompt "En un lugar"
-./target/release/eva_llm_v0 info  --weights out.weights
+# any UTF-8 text file works; the numbers above are on Don Quijote,
+# public domain, from Project Gutenberg.
+./target/release/eva_llm_v0 train --data data/quijote.txt --epochs 10 --out eva.weights
+./target/release/eva_llm_v0 gen   --weights eva.weights --prompt "En un lugar"
+./target/release/eva_llm_v0 info  --weights eva.weights
+
+./target/release/eva_llm_v0 help  # every flag, with its default
 ```
 
-Diagnostics live in `examples/`: `query_swap` (does the model read the query at
-all?), `mask_eval` (per-channel read ablation), `entity_retrieval` (does memory
-help on real text?), `alpha_dispersion` (the decay spectrum).
+`data/` is not in the repository: the corpora are large and freely available,
+and the generated benchmarks are reproducible with
+`cargo run --release --example generate_associative` and `generate_synthetic`,
+whose headers give the exact arguments.
+
+`logs/` is: 85 raw training and evaluation logs. They are the artifacts
+`PAPER-DRAFT.md` verifies its figures against, which is why they are committed
+unedited rather than summarised.
+
+Diagnostics live in `examples/`, each stating at its top the question it
+answers and the number that would kill it: `query_swap` (does the model read
+the query at all, or just emit a value that is in play?), `entity_retrieval`
+(does memory help on real text, by distance?), `mask_eval` (conditional bpb on
+the long-range synthetic benchmark), `state_probe` (is the failure storage or
+read?), `alpha_dispersion` (the decay spectrum). The per-channel read ablation
+that localises the binding to 4 channels is `EVA_READ_MASK=c1,c2,...`, which
+any of them honours, since it lives in the forward.
 
 ## What this is not
 

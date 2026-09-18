@@ -1,4 +1,4 @@
-### ATTN (Martha) k2 BIG
+### ATTN (Machine B) k2 BIG
 eva eval_associative: 16m5b_assoc_k2_big_attn.weights | data/assoc_k2_seq512_win1500_seed42.dat | seq=512
   windows: 1349 train, 150 val (contiguous cut)
 
@@ -25,7 +25,7 @@ eva eval_associative: 16m5b_assoc_k2_big_attn.weights | data/assoc_k2_seq512_win
   chance floor: value alphabet is 32 symbols -> 3.125% acc, 5.0 bpb if guessing uniformly among values
 
 
-### ATTN (Cristina, replica) k2 BIG
+### ATTN (Machine A, replica) k2 BIG
 eva eval_associative: 16m5b_assoc_k2_big_attn_Cristina.weights | data/assoc_k2_seq512_win1500_seed42.dat | seq=512
   windows: 1349 train, 150 val (contiguous cut)
 

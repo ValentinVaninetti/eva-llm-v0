@@ -75,7 +75,7 @@ fn cmd_gen(args: &[String]) -> Result<(), String> {
     let seed = flag_num(args, "seed", 0)? as u64;
     let mut rng = Rng::new(seed);
     let ids = ByteTokenizer::encode(&prompt);
-    let out = generate(&model, &ids, tokens, temp, topk, &mut rng, model.cfg.seq_len);
+    let out = generate(&model, &ids, tokens, temp, topk, &mut rng);
     let text = ByteTokenizer::decode(&out);
     println!("{}", text);
     Ok(())

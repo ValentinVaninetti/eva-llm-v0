@@ -98,10 +98,8 @@ pub fn generate_constrained(
     temp: f32,
     top_k: usize,
     rng: &mut Rng,
-    seq: usize,
     constraint: &mut dyn Constraint,
 ) -> Vec<usize> {
-    let _ = seq; // the window trimming is now handled by the state
     let mut ctx: Vec<usize> = prompt.to_vec();
     let mut out: Vec<usize> = Vec::with_capacity(max_tokens);
     if ctx.is_empty() {
@@ -134,10 +132,9 @@ pub fn generate(
     temp: f32,
     top_k: usize,
     rng: &mut Rng,
-    seq: usize,
 ) -> Vec<usize> {
     let mut nc = NoConstraint;
-    generate_constrained(model, prompt, max_tokens, temp, top_k, rng, seq, &mut nc)
+    generate_constrained(model, prompt, max_tokens, temp, top_k, rng, &mut nc)
 }
 
 /// What happened at each position, to be able to say how much was saved

@@ -1287,3 +1287,38 @@ fn lowrank_params_actually_receive_gradient() {
         assert!(nonzero(gv), "{} receives NO gradient once po != 0 -- the path does not learn", name);
     }
 }
+
+/// A checkpoint whose tensor is a different size than the model expects must
+/// be REFUSED, not loaded. This used to be a `debug_assert`, which release
+/// builds compile out -- and this project runs in release, so the check was
+/// not there at all: the parameter was overwritten with a wrong-length vector
+/// and the model went on reading past its own shape.
+#[test]
+fn a_checkpoint_of_the_wrong_shape_is_refused() {
+    use crate::model::{Arch, EvaConfig, EvaModel};
+    let cfg = |dim: usize| EvaConfig {
+        vocab: 256, dim, ffn_dim: dim * 2, blocks: 1,
+        conv_kernel: 3, eps: 1e-5, seq_len: 6, arch: Arch::Clock,
+    };
+    let dir = std::env::temp_dir().join(format!("eva_ckpt_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("m.weights");
+    let p = path.to_str().unwrap();
+
+    crate::save::save_model(p, &EvaModel::new(cfg(8))).unwrap();
+    assert!(crate::save::load_model(p).is_ok(), "the matching checkpoint has to load");
+
+    // Same file, a model of a different width: every tensor is the wrong size.
+    let mut buf = std::fs::read(p).unwrap();
+    buf[6..10].copy_from_slice(&256u32.to_le_bytes());   // vocab, unchanged
+    buf[10..14].copy_from_slice(&16u32.to_le_bytes());   // dim 8 -> 16
+    std::fs::write(p, &buf).unwrap();
+
+    let Err(err) = crate::save::load_model(p) else {
+        panic!("a wrong-sized tensor must be refused");
+    };
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    assert!(err.to_string().contains("wants"), "the error has to say what it wanted: {err}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}

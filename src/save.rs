@@ -70,7 +70,7 @@ pub fn load_model(path: &str) -> std::io::Result<EvaModel> {
     };
 
     let n = read_u32(&buf, &mut pos) as usize;
-    let mut weights: HashMap<String, Vec<f32>> = HashMap::with_capacity(n);
+    let mut weights: HashMap<String, (Vec<usize>, Vec<f32>)> = HashMap::with_capacity(n);
     for _ in 0..n {
         let name = read_str(&buf, &mut pos);
         let ndim = read_u32(&buf, &mut pos) as usize;
@@ -87,14 +87,25 @@ pub fn load_model(path: &str) -> std::io::Result<EvaModel> {
             *x = f32::from_le_bytes(b);
             pos += 4;
         }
-        let _ = shape;
-        weights.insert(name, data);
+        weights.insert(name, (shape, data));
     }
 
     let mut model = EvaModel::new(cfg);
     for (name, t) in model.named_parameters_mut() {
-        if let Some(w) = weights.remove(&name) {
-            debug_assert_eq!(w.len(), t.data.len(), "shape mismatch in {}", name);
+        if let Some((shape, w)) = weights.remove(&name) {
+            // Checked here, not with debug_assert: release builds have
+            // debug-assertions off, and this project runs in release. Loading a
+            // checkpoint whose tensor is a different size used to overwrite the
+            // parameter anyway and leave the model reading past its own shape.
+            if w.len() != t.data.len() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "{name}: the checkpoint holds {:?} ({} values) but this model wants {:?} ({} values)",
+                        shape, w.len(), t.shape, t.data.len()
+                    ),
+                ));
+            }
             t.data = std::sync::Arc::new(w);
         }
     }

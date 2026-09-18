@@ -541,7 +541,7 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
             }
 
             if step.is_multiple_of(tcfg.log_every * 10) {
-                let sample = generate_sample(&model, mcfg.seq_len, 64, &mut rng);
+                let sample = generate_sample(&model, 64, &mut rng);
                 println!("sample: {:?}", ByteTokenizer::decode(&sample));
                 save_model(&tcfg.out_path, &model).map_err(|e| format!("could not save: {}", e))?;
             }
@@ -678,8 +678,8 @@ fn bits_per_byte(loss: f32) -> f32 {
     loss / std::f32::consts::LN_2
 }
 
-pub fn generate_sample(model: &EvaModel, seq: usize, max: usize, rng: &mut crate::rng::Rng) -> Vec<usize> {
-    let mut ids = crate::gen::generate(model, &[0], max, 0.9, 32, rng, seq);
+pub fn generate_sample(model: &EvaModel, max: usize, rng: &mut crate::rng::Rng) -> Vec<usize> {
+    let mut ids = crate::gen::generate(model, &[0], max, 0.9, 32, rng);
     ids.retain(|&x| x != 0);
     ids
 }

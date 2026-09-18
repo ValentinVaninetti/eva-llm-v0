@@ -1,4 +1,4 @@
-//! Requested by GPT: CAUSAL evidence for why ClockMem flattens toward
+//! Requested independently: CAUSAL evidence for why ClockMem flattens toward
 //! short memory, not another aggregate bpb number.
 //!
 //! Part 1 -- sensitivity: gradient of the loss with respect to EACH

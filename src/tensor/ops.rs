@@ -219,8 +219,7 @@ pub fn sigmoid(x: &Tensor) -> Tensor {
 
 /// Squashing R->(0,1) with a POLYNOMIAL tail instead of an exponential one:
 /// the derivative decays as 1/|z|^3 (`sigmoid` decays as exp(-|z|)) -- much
-/// more signal survives far from the center. Exists for Round 4, GPT's
-/// hypothesis: if the flattening of `alpha` in ClockMem is sigmoid
+/// more signal survives far from the center. Exists for Round 4, the /// hypothesis: if the flattening of `alpha` in ClockMem is sigmoid
 /// saturation (measured: |grad| 20-100x smaller in the fast band) and not a
 /// preference of the loss, this op should let gradient keep arriving even
 /// with alpha near 0.
@@ -529,7 +528,7 @@ pub fn clockmem_gated_from(
 /// last K states instead of the single current state:
 ///   read[t,c] = sum_{j=0..K-1} wread[j,c] * state[t-j,c]   (zeros for t-j<0)
 ///   out[t,c]  = q[t,c] * read[t,c] * g[t,c]
-/// EXPERIMENT (GPT/Dante lead, 2026-08-14): test whether ClockMem's long
+/// EXPERIMENT (2026-08-14): test whether ClockMem's long
 /// range fails because out=q*cur*g can only see a blurred leaky average, not
 /// a specific past position. The window is the minimal fix: with K>=N+1 the
 /// readout CAN express the finite difference that recovers the write at
@@ -619,7 +618,7 @@ pub fn clockmem_readwin(
     (t, cur)
 }
 
-/// CLEAN INJECTION (GPT/Dante lead, 2026-08-14, after the activation probe
+/// CLEAN INJECTION (2026-08-14, after the activation probe
 /// showed q*g kills the recovered write: b0.read 38.6% -> b0.m 0.84%).
 ///
 /// Same state as `clockmem_from`, but the OUTPUT is the gated current-state
@@ -683,13 +682,13 @@ pub fn clockmem_inject(
     (t, cur)
 }
 
-/// R1c (GPT/Claude lead, 2026-08-15): the structured learnable inverse.
+/// R1c (2026-08-15): the structured learnable inverse.
 /// Same state and additive residual injection as `clockmem_inject`, but the
 /// recovered write uses PER-CHANNEL LEARNABLE parameters instead of the
 /// physical alpha/beta:
 ///   read[t,c] = inv_beta[c] * (state[t-N+1,c] - alpha_read[c]*state[t-N,c])
 ///   out[t,c]  = q[t,c]*cur[t,c]*g[t,c] + read[t,c]            (t>=N)
-/// Two safety choices, both requested by GPT after R1a/R1b showed the free
+/// Two safety choices, both after R1a/R1b showed the free
 /// Kxd matrix drifting into noisy taps:
 ///   * NO free matrix: the read is the inverse-leaky-filter family, ~2
 ///     params/channel (alpha_read, inv_beta) -- the noisy-tap escape R1a
@@ -762,7 +761,7 @@ pub fn clockmem_inject_learn(
 // contribution |s*read| (the term R2 actually adds to the residual). Keyed by
 // the block's alpha_read tensor id. Written during the op forward, read and
 // reset by the training trace (WreadTrace) -- so `s * memory_path` is logged
-// separately from `z` and `s`, as Claude asked.
+// separately from `z` and `s`, as we asked.
 use std::sync::Mutex;
 static R2_READ: Mutex<Vec<(usize, f64, u64)>> = Mutex::new(Vec::new());
 
@@ -795,7 +794,7 @@ pub fn r2_read_stats(key: usize) -> Option<(f32, u64)> {
     None
 }
 
-/// R2 (Claude/GPT/Valentín, 2026-08-15): the structured memory path behind a
+/// R2 (2026-08-15): the structured memory path behind a
 /// gated scalar that CANNOT annul it.
 ///   out[t,c] = q[t,c]*cur[t,c]*g[t,c] + s*read[t,c]       (t>=N)
 ///   s        = floor + (1-floor)*sigmoid(z)   (z learnable, floor>0 fixed)
@@ -803,8 +802,7 @@ pub fn r2_read_stats(key: usize) -> Option<(f32, u64)> {
 /// The floor guarantees s >= floor > 0: even if the gate saturates closed,
 /// memory_path keeps contributing and its own params (alpha_read, inv_beta)
 /// keep receiving REAL gradient -- the property (2) this experiment tests.
-/// We learn inv_beta directly (never divide by a learned param, Claude's
-/// prevention). z receives gradient only while sigmoid(z) is unsaturated
+/// We learn inv_beta directly (never divide by a learned param, the /// prevention). z receives gradient only while sigmoid(z) is unsaturated
 /// (property (1), explicitly NOT required by the design). At z such that
 /// sigmoid(z)=1 the op reduces to `clockmem_inject_learn`.
 pub fn clockmem_inject_learn_g(
@@ -883,7 +881,7 @@ pub fn clockmem_inject_learn_g(
     (t, cur)
 }
 
-/// R2-channel (GPT order, 2026-08-15): the block gate vs channel gate control.
+/// R2-channel (2026-08-15): the block gate vs channel gate control.
 /// Same as `clockmem_inject_learn_g` but z is [D]: one gate PER CHANNEL,
 ///   s[c] = floor + (1-floor)*sigmoid(z[c])   (z[c] learned, floor>0 fixed)
 ///   out[t,c] = q*cur*g + s[c]*read[t,c]
@@ -974,7 +972,7 @@ pub fn clockmem_inject_learn_gc(
     (t, cur)
 }
 
-/// R1 (GPT/Dante lead, 2026-08-15): the windowed read WITHOUT the q*g gate.
+/// R1 (2026-08-15): the windowed read WITHOUT the q*g gate.
 ///   state: same leaky recurrence cur = alpha*cur + beta*k*v.
 ///   read[t,c] = sum_{j<K} wread[j,c] * state[t-j,c]   (zeros for t-j<0)
 ///   out[t,c]  = q[t,c]*cur[t,c]*g[t,c] + read[t,c]
@@ -1066,7 +1064,7 @@ pub fn clockmem_readwin_inj(
     (t, cur)
 }
 
-/// LOW-RANK OUTER-PRODUCT WRITE (task #58, Claude/Dante/GPT/Valentín,
+/// LOW-RANK OUTER-PRODUCT WRITE (task #58,
 /// 2026-08-18). The one intervention Section 4 never tried: it changes the
 /// WRITE, not the read.
 ///

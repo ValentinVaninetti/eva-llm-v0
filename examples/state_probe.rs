@@ -1,4 +1,4 @@
-//! STORAGE-vs-READ probe for the long-range benchmark (GPT lead decision
+//! STORAGE-vs-READ probe for the long-range benchmark (decision
 //! 2026-08-14, run BEFORE touching src/).
 //!
 //! Question: does the leaky ClockMem state `cur[t]` (or the WRITES the

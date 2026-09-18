@@ -1,6 +1,6 @@
 //! 8. THAT IT BETS -- the per-span stake head.
 //!
-//! The decisive experiment that got defined with Claudio: does a head that
+//! The decisive experiment as defined: does a head that
 //! reads the hidden state AT THE START of a span predict whether the span is
 //! going to go well, better than the free bar (mean p[argmax] approx 0.67)
 //! and before spending anything?

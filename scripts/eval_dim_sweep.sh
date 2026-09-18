@@ -12,14 +12,14 @@
 #   dim 256 / k=2  -> 128 can/clave -> ?       must match 512/k=4
 #   dim 256 / k=4  ->  64 can/clave -> ?       must match 512/k=8
 #
-# Runs on Cristina: evaluacion, no run comparable. EVA_GPU=1 medido en
+# Runs locally: evaluation only, not a comparable run. EVA_GPU=1 measured on
 # 9 s against 32 s per 30 windows; forward only, changes no number.
 set -e
 cd "$(dirname "$0")/.."
 
 ev () {
   local ckpt=$1 data=$2 label=$3
-  if [ ! -f "$ckpt" ]; then echo "FALTA $ckpt -- lo traigo de martha"; scp "martha:~/evallm_check/$ckpt" . ; fi
+  if [ ! -f "$ckpt" ]; then echo "MISSING $ckpt -- fetching it from the remote"; scp "${REMOTE:?set REMOTE=user@host}:~/evallm_check/$ckpt" . ; fi
   echo
   echo "############ $label ############"
   EVA_GPU=1 ./target/release/examples/eval_associative "$ckpt" "$data" 300 2>&1 \
@@ -35,6 +35,6 @@ ev 16m5b_assoc_k4ctl_d256_clock.weights  "$K4" "dim256_k4"
 ev 16m5b_assoc_k2_d256_clock.weights     "$K2" "dim256_k2"
 
 echo
-echo "=== referencias ya medidas (mismo binario, mismo corpus) ==="
+echo "=== already-measured references (same binary, same corpus) ==="
 echo "  dim 512 / k=2 : 99,65% correcto /  0,00% otra clave"
 echo "  dim 512 / k=8 : 23,42% correcto / 76,49% otra clave"

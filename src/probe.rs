@@ -15,7 +15,7 @@
 //! The gate-OFF baseline needs no forward pass: with the plain recurrence
 //! the write magnitude is the block's `beta` at every position, identical
 //! for both classes by construction. The separation the gate could add --
-//! "si es novedad, escribe más" -- is exactly the `r` column of this probe.
+//! "if it is new, write more" -- is exactly the `r` column of this probe.
 //!
 //! "Novelty" is defined per window: position t is NEW if input[t] has not
 //! appeared at any earlier position of the same window, REPEATED otherwise.

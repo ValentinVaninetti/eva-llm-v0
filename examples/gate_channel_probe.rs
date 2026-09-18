@@ -1,4 +1,4 @@
-//! Claude's follow-up to GPT's diagnosis after `activation_probe.rs` localized
+//! the follow-up to the diagnosis after `activation_probe.rs` localized
 //! the signal loss to `m = q*read*g` (b0.read ~38.6% val acc vs b0.m ~0.84%).
 //!
 //! Hypothesis under test: a product of three learned gates (q, read, g) is a

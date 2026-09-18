@@ -22,8 +22,8 @@ fn main() {
                 .arg(&spv)
                 .arg(&path)
                 .status()
-                .expect("glslc no está instalado (instalá glslang-tools o shaderc). Sin glslc no se compilan los shaders Vulkan.");
-            assert!(status.success(), "glslc falló al compilar {}", name);
+                .expect("glslc is not installed (install glslang-tools or shaderc). Without glslc the Vulkan shaders cannot be compiled.");
+            assert!(status.success(), "glslc failed to compile {}", name);
         }
     }
 }

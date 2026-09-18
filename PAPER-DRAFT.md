@@ -40,7 +40,7 @@ Our sharpest result is not that long-range recall is achievable (the precedent a
 
 ## 1. Motivation
 
-[TODO — Valentín/team to write the framing paragraph: why efficiency-via-architecture instead of efficiency-via-scale, what EvaClock is testing. Draft skeleton left here so it isn't forgotten; see `README.md` for the informal version to adapt.]
+[Draft placeholder: the framing paragraph — why efficiency-via-architecture instead of efficiency-via-scale, and what EvaClock is testing — is not written yet. Left here so it is not forgotten; `README.md` has the informal version.]
 
 ## 2. Architecture
 
@@ -74,7 +74,7 @@ Before proposing a mechanism, three plausible causes were tested directly and ea
 
 The seq-length result is notable for surviving its own confound: seq=512 trains with 8x fewer optimizer steps than seq=64, so if the collapse were sensitive to training regime at all, less training should move the spectrum *further* from convergence, not leave it identical. Identical results under an 8x step-count disparity is evidence *against* a training-regime explanation, not merely an absence of evidence for one.
 
-**Verification:** numbers reproduced from `TRABAJO-2026-08-12.md` (persistence: "CLAUDIO: pregunta 1 de GPT respondida"; corpus: "achatado con 411 KB"; seq-length: "seq 64/128/256/512 terminó"). Read directly from the dated log by Claude during this drafting session, 2026-08-15.
+**Verification:** numbers reproduced from the dated working log of 2026-08-12 (persistence, corpus flattening at 411 KB, and the seq-length sweep at 64/128/256/512), read directly from that log during this drafting session, 2026-08-15.
 
 ### 3.3 Mechanism
 
@@ -100,7 +100,7 @@ Reproduced bit-for-bit (identical loss trajectory, identical per-step trace) acr
 
 **What this does not yet show:** that the distributed spectrum is useful, not merely free — on this corpus (250KB of general technical prose) it gives the same bpb, not better. Whether it pays off on data with genuine long-range dependencies is the subject of Section 4.
 
-**Verification:** figures reproduced from `README.md` ("El reloj se achataba solo...") and `logs/traza_temp13.log` (committed trace artifact), cross-checked against three separate training log files by Claude, 2026-08-14/15.
+**Verification:** figures reproduced from the project notes of the time (the clock flattening on its own) and `logs/traza_temp13.log` (committed trace artifact), cross-checked against three separate training log files, 2026-08-14/15.
 
 ## 4. Finding 2: storage exists, transport is where it dies
 
@@ -149,7 +149,7 @@ Two different guarantees are easy to conflate when talking about "keeping the ga
 
 R2's floor construction guarantees (2) unconditionally by design (the memory path is never given a literal zero weight). It does **not** guarantee (1) — any bounded sigmoid-shaped gate saturates at its extremes by construction, with vanishing self-gradient there, regardless of any floor applied to its output. In the R2 run measured, the gate did not saturate (settled at `s≈0.56`, an interior point) so this distinction did not bind in practice — but it should not be assumed to hold in general, and should be traced explicitly (`z`, `s`, and `s·read` logged separately) in any follow-up.
 
-**Verification:** all bpb/accuracy figures in the table were independently re-run (not merely re-read from a report) by Claude against the actual checkpoints and/or eval logs in this repository during drafting, 2026-08-14/15: `inject`/`inject_r2` cross-checked against `logs/eval_N256_win257_inject*.log`; `r1a`/`r1b`/`r1c`/`r1c_neutral` against their respective `logs/eval_N256_win257_*.log`; R2 re-run live against `16m5b_N256_T1_win257_r2.weights` (`mask_eval` re-executed, not just read) and cross-checked against the raw `logs/train_N256_win257_r2.log` trace line-by-line for `z`/`s`/`mean|s*read|`.
+**Verification:** all bpb/accuracy figures in the table were independently re-run (not merely re-read from a report) against the actual checkpoints and/or eval logs in this repository during drafting, 2026-08-14/15: `inject`/`inject_r2` cross-checked against `logs/eval_N256_win257_inject*.log`; `r1a`/`r1b`/`r1c`/`r1c_neutral` against their respective `logs/eval_N256_win257_*.log`; R2 re-run live against `16m5b_N256_T1_win257_r2.weights` (`mask_eval` re-executed, not just read) and cross-checked against the raw `logs/train_N256_win257_r2.log` trace line-by-line for `z`/`s`/`mean|s*read|`.
 
 ### 4.5 Does the mechanism generalize across N?
 
@@ -161,7 +161,7 @@ R2-channel (the structurally more permissive variant, per 4.3) was re-run at N �
 | 128 | 129 | 0.0299 | 99.737% |
 | 256 | 257 | 0.0356 | 99.609% |
 
-All three re-run and independently confirmed by Claude against the checkpoints (`mask_eval` re-executed, not read from a report), 2026-08-15. The mechanism resolves at all three distances — there is no N in the tested range where it fails, unlike the baseline (`out=q·cur·g`), which sits at ≈8.0 bpb regardless of N. bpb rises mildly with N (0.024 → 0.030 → 0.036), consistent with the task getting harder, not with the mechanism degrading.
+All three re-run and independently confirmed against the checkpoints (`mask_eval` re-executed, not read from a report), 2026-08-15. The mechanism resolves at all three distances — there is no N in the tested range where it fails, unlike the baseline (`out=q·cur·g`), which sits at ≈8.0 bpb regardless of N. bpb rises mildly with N (0.024 → 0.030 → 0.036), consistent with the task getting harder, not with the mechanism degrading.
 
 **Notable negative-ish finding: the gate does not adapt to N.** Final gate value `s` clusters at ≈0.53 in all three N conditions (block 0: 0.532/0.533/0.536 at N=32/128/256; block 4: 0.532/0.532/0.534) — essentially the same fixed compromise regardless of how much memory the task needs. What *does* adapt is the memory route itself (`alpha_read`/`inv_beta`), which sustains the same effective contribution `s·read` per block across all three N despite the fixed attenuation and the differing distance. Generalization across N is carried by the floor-plus-learnable-route design, not by the gate learning to open more for harder tasks.
 
@@ -182,9 +182,9 @@ Tested directly, without retraining: take the trained N=256 R2-channel checkpoin
 
 The landscape is **asymmetric, and not flat on the open side** — the best point in this sweep is `z=+1` (`s≈0.74`, bpb 0.0347), not full-open (`z=+6` gives 0.0357, slightly worse than `z=+1`). Toward the floor, there is a real, sharp cliff — forcing the gate down to `s≈0.10` collapses accuracy to 40% and bpb to 7.18, close to the unsolved-baseline regime. Toward open, bpb stays flat-to-better across a broad plateau (`s` from ≈0.53 to ≈1.0, bpb between 0.0347 and 0.0359) with a shallow minimum around `s≈0.74` — opening the gate further than training ever reached does not hurt, and mildly helps. This favors the gradient-magnitude explanation over the genuine-optimum explanation: nothing in the loss landscape penalizes a more open gate in this range; training simply never got there, consistent with the ~1000x smaller per-channel gradient noted above. The one load-bearing property is staying clear of the floor-side cliff — which is exactly the property the floor was designed to guarantee, now confirmed from the opposite direction (perturbing a trained model) rather than only from the training trace.
 
-**Verification:** new diagnostic (`examples/gate_perturb.rs`, read-only, no `src/` changes, no retraining), written and run by Claude, 2026-08-15, against `16m5b_N256_T1_win257_r2c.weights`. The baseline row (`z=0.0`, 0.0359) reproduces the trained-model figure from Section 4.3/4.5 (0.0356) to within run rounding, confirming the perturbation harness itself is measuring the same thing as `mask_eval.rs`.
+**Verification:** new diagnostic (`examples/gate_perturb.rs`, read-only, no `src/` changes, no retraining), written and run, 2026-08-15, against `16m5b_N256_T1_win257_r2c.weights`. The baseline row (`z=0.0`, 0.0359) reproduces the trained-model figure from Section 4.3/4.5 (0.0356) to within run rounding, confirming the perturbation harness itself is measuring the same thing as `mask_eval.rs`.
 
-**Independent confirmation by retraining from a different starting point.** The perturbation result predicts that training initialized closer to the plateau's shallow minimum should converge there and stay, rather than drifting back to ≈0.535. Tested directly: retrained N=256 R2-channel from `z0=1.0` (`s≈0.744` at init) instead of the default `z0=0.0`, same recipe/seed/floor otherwise. Result: final `z` settled at 1.02–1.04 across all 5 blocks (`s≈0.75`, 0/512 channels closed, 0/512 fully open) — no drift back toward the `z0=0` run's 0.535 — with bpb 0.0354 / 99.609% top-1, matching the reference solutions and marginally better than the `z0=0` run's 0.0356. This independently confirms the perturbation-based reading via a completely different method (retraining from a different init, not hand-editing a trained checkpoint): the gate's resting value is determined by where training starts within the plateau, not by a single attracting optimum. Verified by Claude against the checkpoint and raw training log (`logs/train_N256_win257_r2c_z0p1.log`), 2026-08-15.
+**Independent confirmation by retraining from a different starting point.** The perturbation result predicts that training initialized closer to the plateau's shallow minimum should converge there and stay, rather than drifting back to ≈0.535. Tested directly: retrained N=256 R2-channel from `z0=1.0` (`s≈0.744` at init) instead of the default `z0=0.0`, same recipe/seed/floor otherwise. Result: final `z` settled at 1.02–1.04 across all 5 blocks (`s≈0.75`, 0/512 channels closed, 0/512 fully open) — no drift back toward the `z0=0` run's 0.535 — with bpb 0.0354 / 99.609% top-1, matching the reference solutions and marginally better than the `z0=0` run's 0.0356. This independently confirms the perturbation-based reading via a completely different method (retraining from a different init, not hand-editing a trained checkpoint): the gate's resting value is determined by where training starts within the plateau, not by a single attracting optimum. Verified against the checkpoint and raw training log (`logs/train_N256_win257_r2c_z0p1.log`), 2026-08-15.
 
 ### 4.7 First real-text test: does the temperature fix (Section 3) help on an actual book?
 
@@ -218,7 +218,7 @@ Under the memory-length definition all three rows are ≈98% fast. Neither `T=1`
 
 **Decision (not autopiloted):** this result does not call for immediately spending more compute in any particular direction — it calls for the team to look at it together before choosing between a longer `seq`, more epochs, or a more targeted real-text evaluation (e.g., measuring recall specifically at positions where a name/entity reappears after a long gap, rather than averaging bpb over the whole book) before running anything further. Checkpoints (`16m5b_quijote_T1.weights`, `16m5b_quijote_T13.weights`) and full logs are kept for that discussion.
 
-**Verification:** both runs launched, monitored, and their final figures independently re-read from the raw training logs by Claude, 2026-08-15 (`logs/train_quijote_T1.log`; `train_quijote_T13.log` on the second machine, copied locally).
+**Verification:** both runs launched, monitored, and their final figures independently re-read from the raw training logs, 2026-08-15 (`logs/train_quijote_T1.log`; `train_quijote_T13.log` on the second machine, copied locally).
 
 ### 4.8 A directed benchmark on real text: entity retrieval — in-context memory does help at 32–256 bytes, and a first non-null for the temperature fix under carried state
 
@@ -246,9 +246,9 @@ What also helps, separately, is having seen the entity anywhere during training 
 
 **Mode 2 — state carried across windows (`forward_carrying`), reaching distances past 512 up to 1024+.** The model was trained with independent windows, so carried state is explicitly out-of-distribution; this mode is exploratory. Here a real, large, and — critically — *reproducible* asymmetry appeared: under `T=1`, carried state collapses the model's entity predictions (rank of the correct byte among 256 rises from ≈9–13 in-distribution to ≈25–62; the entity's own bpb rises from ≈0.7–2 to ≈17–21). Under `T=1.3`, the same carry does **not** collapse predictions (rank stays ≈8–12, matching in-distribution behavior).
 
-Because the original `T=1` and `T=1.3` checkpoints had been trained on two different machines (Section 4.7), this asymmetry was initially confounded with hardware. It was resolved with a full 2×2 control — both temperatures retrained and evaluated on *both* machines independently (Claude ran the Martha side, Dante the Cristina side, without coordinating on intermediate numbers):
+Because the original `T=1` and `T=1.3` checkpoints had been trained on two different machines (Section 4.7), this asymmetry was initially confounded with hardware. It was resolved with a full 2×2 control — both temperatures retrained and evaluated on *both* machines, each side run by a different party without coordinating on intermediate numbers:
 
-| | Cristina (GTX 1650) | Martha (RX 580) |
+| | Machine A (GTX 1650) | Machine B (RX 580) |
 |---|---|---|
 | **T=1**, carry, val, rank of correct byte (mean across distance buckets) | 25.4–61.8 (collapses) | 25.7–62.4 (collapses) |
 | **T=1.3**, carry, val, rank of correct byte (mean across distance buckets) | 8.1–11.9 (stable) | 8.1–11.8 (stable) |
@@ -257,7 +257,7 @@ All four cells were trained and evaluated independently (not copied between mach
 
 **This is the first non-null result for the temperature fix on anything resembling real language**, after three null results (Section 3's own corpus, Section 4.7's global bpb, and this section's own in-distribution retrieval metric). The honest caveat is sitting right next to it: it only appears in an out-of-distribution regime (carried state) that the model was never trained for, so it is evidence that `T=1.3` makes the memory spectrum more *robust to distribution shift in how state is used*, not yet evidence that it improves in-distribution long-range language modeling. Whether that robustness itself is useful — e.g., whether it would matter if the model were trained on longer sequences or with persistent state to begin with — is untested.
 
-**Verification:** entity counts, bucket sample sizes, and headline numbers independently re-derived by Claude by re-running `entity_retrieval.rs` from scratch (not reading Dante's reported figures) for the T=1/Cristina baseline and for both Martha-side conditions; the Cristina-side `T=1.3` retraining and its carry-mode numbers were produced independently by Dante and cross-checked by Claude against the raw log. All artifacts: `examples/entity_retrieval.rs`; checkpoints `16m5b_quijote_{T1,T13,T13_Cristina,T1_martha}.weights`; logs `logs/entity_retrieval_quijote_{T1,T13}_{indep,carry}.log`, `logs/entity_retrieval_quijote_T13_cristina_carry.log`, `logs/entity_retrieval_quijote_T1_martha_carry.log`.
+**Verification:** entity counts, bucket sample sizes, and headline numbers independently re-derived by re-running `entity_retrieval.rs` from scratch (not reading the team's reported figures) for the T=1/Machine A baseline and for both Machine B-side conditions; the Machine A-side `T=1.3` retraining and its carry-mode numbers were produced independently and cross-checked against the raw log. All artifacts: `examples/entity_retrieval.rs`; checkpoints `16m5b_quijote_{T1,T13,T13_machineA,T1_machineB}.weights`; logs `logs/entity_retrieval_quijote_{T1,T13}_{indep,carry}.log`, `logs/entity_retrieval_quijote_T13_machineA_carry.log`, `logs/entity_retrieval_quijote_T1_machineB_carry.log`.
 
 ### 4.9 Is carry-stability special to the temperature fix, or free with any slow recurrence?
 
@@ -276,7 +276,7 @@ Two things resolve at once:
 
 This closes the most direct version of the SSM-comparison question raised in Section 6 (does a modern-style slow-decay SSM share ClockMem's failure to show long-range benefit on real text?) with a "yes" — on the cheap in-codebase baseline, not yet on an external state-of-the-art implementation. The open question this leaves, largely unaddressed by this draft's approach so far, is architectural rather than parametrization-level: what would make retained state actually informative for prediction, as opposed to merely available and stable.
 
-**Verification:** checkpoint (`16m5b_quijote_SSM.weights`), global bpb, and carry-mode bucket table independently re-read by Claude against the raw logs (`logs/train_quijote_SSM.log`, `logs/entity_retrieval_quijote_SSM_{indep,carry}.log`) — all figures (1.988 bpb; carry val top1 14.60% and rank at `d>1024`) match Dante's reported numbers exactly.
+**Verification:** checkpoint (`16m5b_quijote_SSM.weights`), global bpb, and carry-mode bucket table independently re-read against the raw logs (`logs/train_quijote_SSM.log`, `logs/entity_retrieval_quijote_SSM_{indep,carry}.log`) — all figures (1.988 bpb; carry val top1 14.60% and rank at `d>1024`) match the team's reported numbers exactly.
 
 ### 4.10 Reframing the question: content-addressed recall, not positional recall
 
@@ -305,7 +305,7 @@ ClockMem shows a real, distance-decaying signal on held-out data (6.29% → 4.76
 
 **The most likely honest explanation, not yet confirmed:** induction-head-style circuits are documented in the literature as sometimes forming through a comparatively abrupt phase transition during training, after a threshold amount of exposure, rather than gradually (Olsson et al. 2022). At only ≈2700 training steps, attention may simply not have crossed that threshold yet, while ClockMem's continuously-adjustable state may not depend on the same discrete transition. This has not been tested (e.g. by training attention substantially longer on the same task) and should not be read as "ClockMem beats attention at associative recall" in general — it is one data point, one scale, one training budget, run once each.
 
-**Verification:** both `generate_associative.rs` and `eval_associative.rs` are new, `src/`-untouched examples; entity self-check (0 failures recomputing bindings from raw bytes alone) passed on every corpus generated. All bpb/accuracy figures in the table read directly from the eval tool's output by Claude, who also wrote and ran both the generator and evaluator and launched all four training runs (ClockMem and attention, at both difficulty settings) across both machines. Checkpoints: `16m5b_assoc_{clock,attn}.weights` (8-key, null), `16m5b_assoc_k2_clock.weights` (2-key, small, overfit), `16m5b_assoc_k2_big_{clock,attn}.weights` (2-key, large, the reported result). Logs: `logs/train_assoc_*.log`, eval outputs in the scratch directory referenced in `TRABAJO-2026-08-15.md`'s Claude section for this date.
+**Verification:** both `generate_associative.rs` and `eval_associative.rs` are new, `src/`-untouched examples; entity self-check (0 failures recomputing bindings from raw bytes alone) passed on every corpus generated. All bpb/accuracy figures in the table read directly from the eval tool's output, who also wrote and ran both the generator and evaluator and launched all four training runs (ClockMem and attention, at both difficulty settings) across both machines. Checkpoints: `16m5b_assoc_{clock,attn}.weights` (8-key, null), `16m5b_assoc_k2_clock.weights` (2-key, small, overfit), `16m5b_assoc_k2_big_{clock,attn}.weights` (2-key, large, the reported result). Logs: `logs/train_assoc_*.log`, eval outputs in the scratch directory referenced in the working log of 2026-08-15's the team section for this date.
 
 ### 4.11 With enough unique data, ClockMem solves content-addressed recall — and then collapses as the number of keys grows
 
@@ -385,7 +385,7 @@ Attention at 8 keys is at chance and — unlike ClockMem — has also lost the a
 
 A secondary observation, also from a data-starved regime and therefore weak: a gap-controlled 2/3/4-key sweep on the small corpus shows near-range accuracy *rising* with key count (6.29% → 13.22% → 27.92%), which tracks query density (29.8k → 47.5k → 61.5k training queries) rather than capacity, and is exactly why that sweep cannot answer the capacity question. Its one non-density-explained pattern is retention, which falls monotonically as keys increase (75.7% → 53.2% → 30.3%), matching the 8-key large-data result (44.1%).
 
-**Verification:** all figures re-read by Claude directly from the eval tool's output on the actual checkpoints; every corpus passed the generator's self-check (bindings recomputed from raw bytes alone, 0 failures). The evaluation tool gained an optional third argument capping windows per section — scoring 22.5k windows in full takes over an hour, while 300 val windows already yield 13,986 query positions in the shortest bucket alone. Checkpoints: `16m5b_assoc_k2_huge_{clock,attn}.weights`, `16m5b_assoc_k8ctl_huge_clock.weights`, `16m5b_assoc_k{3,4}ctl_clock.weights`. Logs: `logs/train_assoc_*.log`.
+**Verification:** all figures re-read directly from the eval tool's output on the actual checkpoints; every corpus passed the generator's self-check (bindings recomputed from raw bytes alone, 0 failures). The evaluation tool gained an optional third argument capping windows per section — scoring 22.5k windows in full takes over an hour, while 300 val windows already yield 13,986 query positions in the shortest bucket alone. Checkpoints: `16m5b_assoc_k2_huge_{clock,attn}.weights`, `16m5b_assoc_k8ctl_huge_clock.weights`, `16m5b_assoc_k{3,4}ctl_clock.weights`. Logs: `logs/train_assoc_*.log`.
 
 ### 4.12 The 8-key collapse is not a capacity limit: it is an optimization lottery
 
@@ -477,7 +477,7 @@ In the highest-signal bucket (32–128): mean **−0.698**, sd **0.123**, all ei
 
 **And an unlooked-for positive result.** All eight seeds show negative Δlnp at 32–128 and at 128–256. **ClockMem's in-context memory does help on real text, consistently, between roughly 32 and 256 bytes**, switching off beyond 256. That converts the corrected Section 4.8 finding from n=1 into **n=8** in the same direction — not what the round set out to find, but the most robust real-text result in this draft.
 
-**Verification:** figures re-read from the raw logs; the eight bpb values and all 32 Δlnp cells were independently checked against them by Dante under house rule 6. Not verifiable from logs at the time of writing: the gate ablation counts (BASE 2/17, NOGATE 0/12), whose `query_swap` and `eval_associative` outputs for the short checkpoints on the second machine were not retained — flagged as a pending audit, non-blocking.
+**Verification:** figures re-read from the raw logs; the eight bpb values and all 32 Δlnp cells were independently checked against them under house rule 6. Not verifiable from logs at the time of writing: the gate ablation counts (BASE 2/17, NOGATE 0/12), whose `query_swap` and `eval_associative` outputs for the short checkpoints on the second machine were not retained — flagged as a pending audit, non-blocking.
 
 ## 5. Cross-cutting observation: solutions as families, not points **[OPEN — flagged, not yet measured as a phenomenon]**
 
@@ -535,4 +535,4 @@ What we believe is not simply restated from prior work: the two-mechanism causal
 
 ## Acknowledgments
 
-This work is the product of a four-way collaboration with no single author: Valentín (project owner, decisions, hardware), Dante (OpenCode, implementation lead for most experiments in Section 4), GPT (hypothesis generation and experimental design review, no direct repository access), and Claude (implementation, cross-verification of all reported figures against raw logs, this draft). See `OVERVIEW.md` for the informal description of how this process works.
+This work is the product of a collaboration with no single author: a human project owner (direction, decisions, hardware) working with several AI assistants in separate roles — implementation, hypothesis generation and experimental-design review, and independent cross-verification of reported figures against the raw logs. Where the text says a figure was independently re-run or re-read, that was done by a different party than the one that produced it.

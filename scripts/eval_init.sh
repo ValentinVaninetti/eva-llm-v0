@@ -12,12 +12,12 @@ for I in 101 102 103 104 105 106 107 108 109 110 111 112; do
   vals=""
   for S in 2500 5000; do
     f="snaps_init/init_i${I}_step${S}.weights"
-    [ -f "$f" ] || timeout 200 scp -q "martha:~/evallm_check/snaps_init/init_i${I}_step${S}.weights" snaps_init/ 2>/dev/null
+    [ -f "$f" ] || timeout 200 scp -q "${REMOTE:?set REMOTE=user@host}:~/evallm_check/snaps_init/init_i${I}_step${S}.weights" snaps_init/ 2>/dev/null
     if [ -f "$f" ]; then
       d=$(EVA_GPU=1 ./target/release/examples/query_swap "$f" "$D" 40 3 2>/dev/null | grep -oE "directional shift [+-][0-9.]+" | grep -oE "[+-][0-9.]+")
       vals="$vals ${d:-?}"
     else
-      vals="$vals (falta)"
+      vals="$vals (missing)"
     fi
   done
   d2500=$(echo $vals | awk '{print $1}'); d5000=$(echo $vals | awk '{print $2}')
@@ -27,5 +27,5 @@ for I in 101 102 103 104 105 106 107 108 109 110 111 112; do
   printf "%-8s  %-12s  %-12s  %s\n" "$I" "$d2500" "$d5000" "$ver"
 done
 echo
-echo "  INIT (orden de datos FIJO):  $n de $tot"
+echo "  INIT (FIXED data order):  $n of $tot"
 echo "  referencia -- orden de datos variable, init fija: 2 de 17 (11,8%)"

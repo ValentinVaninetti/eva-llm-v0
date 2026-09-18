@@ -1,4 +1,4 @@
-//! Does the context's count get lost in `lookup()`? What Claude noted
+//! Does the context's count get lost in `lookup()`? What we noted
 //! (recall.rs:117): `hits.iter()` sums everything before normalizing, and
 //! the caller only receives the normalized distribution -- without the
 //! count or which order answered.
@@ -11,7 +11,7 @@
 //!
 //! Only uses the public API (`build`, `lookup`): doesn't touch `src/`,
 //! doesn't load a model, doesn't use the GPU -- zero collision with
-//! Dante's sweep.
+//! the sweep.
 
 use eva_llm_v0::recall::Recall;
 

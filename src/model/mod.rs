@@ -94,7 +94,7 @@ pub struct EvaModel {
 }
 
 impl EvaModel {
-    /// INIT SEED (Claude, 2026-08-19). This used to be the bare constant
+    /// INIT SEED (2026-08-19). This used to be the bare constant
     /// `0xE7A1`, which meant **initialization could not be varied at all**:
     /// `--seed` moves the training-window order (and, under local credit,
     /// the auxiliary heads), never these weights. Two runs at the same

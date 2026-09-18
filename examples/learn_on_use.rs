@@ -1,11 +1,11 @@
-//! Round 4, next piece flagged by Dante: the kid doesn't learn from its
+//! Round 4, next piece flagged independently: the kid doesn't learn from its
 //! mistakes WHILE IN USE. The table gets built once from train and after
 //! that it's read-only -- when the final system errs and the real answer
 //! arrives (here: the corpus's real byte, simulating streaming/
 //! transcription/correction), that error gets lost. "The kid improves
 //! while working."
 //!
-//! The teacher's (Dante's) design, as specified:
+//! The teacher design, as specified:
 //! - Marks the EXACT PAIR (context -> real byte), not a concept.
 //! - Marks only where the FINAL system erred AND memory was ignorant
 //!   (miss, or a hit with high H(q)). If the table already knew, the hit

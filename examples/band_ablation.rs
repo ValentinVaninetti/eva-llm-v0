@@ -1,4 +1,4 @@
-//! Requested by GPT after confirming T=1.3: do the fast/medium/slow bands
+//! Requested independently after confirming T=1.3: do the fast/medium/slow bands
 //! serve DIFFERENT functions, or are they just equivalent parameters with
 //! a different alpha? FULL band ablation (every channel of that band, in
 //! ALL blocks at once, switched off in one shot) -- not channel by

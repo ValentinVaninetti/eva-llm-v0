@@ -1,5 +1,5 @@
 //! QUERY-SWAP: does the model actually USE the identity of the key it is
-//! being queried with? (GPT's diagnostic, 2026-08-18.)
+//! being queried with? (the diagnostic, 2026-08-18.)
 //!
 //! WHY THIS EXISTS. The bucket evaluator says every model identifies the
 //! right candidate SET (92-99.9% of top-1 predictions are a value bound

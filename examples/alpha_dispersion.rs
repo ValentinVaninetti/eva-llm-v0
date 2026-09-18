@@ -1,4 +1,4 @@
-//! Free number offered to GPT/Dante: do ClockMem's `alpha`s (the
+//! Free number on offer: do ClockMem's `alpha`s (the
 //! per-channel forgetting) show a real temporal hierarchy after training,
 //! or do they all converge to something similar? Just reading an
 //! already-trained checkpoint -- zero new code, zero training.
@@ -33,15 +33,15 @@ fn main() {
         };
         // alpha = squash(log_clock), same as in forward() -- respects
         // EVA_ALPHA_ANTISAT because the checkpoint might have trained with
-        // algebraic_sigmoid instead of sigmoid (Round 4, GPT's hypothesis).
+        // algebraic_sigmoid instead of sigmoid (Round 4, the hypothesis).
         let antisat = std::env::var("EVA_ALPHA_ANTISAT").is_ok();
         let alphas: Vec<f32> = clock.log_clock.data.iter().map(|&lc| {
-            // BUG ARREGLADO (2026-08-24): esta sonda ignoraba EVA_ALPHA_TEMP y
-            // reportaba sigmoid(z) sobre modelos que usan sigmoid(z/T). O sea
-            // que toda lectura de alfas sobre un checkpoint con temperatura
-            // estaba mostrando valores que el modelo NO usa. Detectado con un
-            // control: leer el mismo checkpoint con y sin la variable daba
-            // idéntico, cuando tenía que dar distinto.
+            // BUG FIXED (2026-08-24): this probe ignored EVA_ALPHA_TEMP and
+            // reported sigmoid(z) on models that use sigmoid(z/T). Every alpha
+            // reading on a checkpoint trained with temperature was therefore
+            // showing values the model does NOT use. Caught by a control:
+            // reading the same checkpoint with and without the variable gave
+            // identical output, when it had to differ.
             let lc = lc / temp;
             if antisat { 0.5 * (1.0 + lc / (1.0 + lc * lc).sqrt()) } else { 1.0 / (1.0 + (-lc).exp()) }
         }).collect();
@@ -88,7 +88,7 @@ fn main() {
     println!("  hold up as useful, at this scale/corpus.");
     println!("  If the deviation is large and there's real mass across several");
     println!("  bands: the hierarchy survived (or sharpened) -- the model IS using");
-    println!("  different time scales per channel, and that's where GPT's question");
+    println!("  different time scales per channel, and that's where the question");
     println!("  would continue (does that accumulated history add something a");
     println!("  \"current\" state alone wouldn't give?).");
 }

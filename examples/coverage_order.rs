@@ -1,4 +1,4 @@
-//! Where does the ~99% coverage Dante found in the training mix come from?
+//! Where does the ~99% coverage found in the training mix come from?
 //! Suspicion: if most of the hits come from LOW orders (2-3, bigrams/
 //! trigrams -- generic language statistics) and not from HIGH orders (6-8,
 //! specific context), then a constant lambda is dampening the gradient for
@@ -8,7 +8,7 @@
 //! be a fixed number.
 //!
 //! Only uses the table (CPU, no model loaded, no GPU) -- zero collision
-//! with Dante's run. And doesn't touch `recall.rs`: everything it uses is
+//! with the run. And doesn't touch `recall.rs`: everything it uses is
 //! already public (`build`, `lookup`, `hit_profile`).
 
 use eva_llm_v0::data::TextDataset;
@@ -106,7 +106,7 @@ fn main() {
     }
 
     println!("\n=== coverage over the training text itself ===");
-    println!("  {covered} / {total} positions ({:.1}%) -- this is the number Dante dampens", 100.0 * covered as f32 / total.max(1) as f32);
+    println!("  {covered} / {total} positions ({:.1}%) -- this is the number being dampened", 100.0 * covered as f32 / total.max(1) as f32);
 
     println!("\n=== which ORDER each hit comes from ===");
     println!("  order   % of the hits");

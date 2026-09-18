@@ -596,7 +596,7 @@ fn gradcheck_clockmem_readwin_inj() {
 
 #[test]
 fn r1c_reproduces_inject() {
-    // Representability check (GPT's precondition): the structured family
+    // Representability check (precondition): the structured family
     // (alpha_read, inv_beta) must contain the verified oracle BY
     // CONSTRUCTION. With alpha_read = alpha_c and inv_beta = 1/beta the
     // learned-inverse op must produce EXACTLY clockmem_inject's output --
@@ -630,7 +630,7 @@ fn gradcheck_clockmem_inject_learn() {
     // separate learnable alpha_read/inv_beta), and there are two new
     // per-channel gradients to check. Also a wrong backward would silently
     // leave alpha_read/inv_beta at init (the "gradient absent" failure mode
-    // GPT wants to be able to distinguish).
+    // we wants to be able to distinguish).
     let (s, d, n) = (6, 3, 3);
     let mk = |a: f32, b: f32| param((0..s * d).map(|j| ((j as f32) * a + b) / 7.0).collect(), vec![s, d]);
     let mut q = mk(1.3, -2.0);
@@ -803,7 +803,7 @@ fn gradcheck_clockmem_inject_learn_g() {
 
 #[test]
 fn r2_channel_contains_scalar() {
-    // R2-channel (GPT control): with z constant across channels, the
+    // R2-channel (control): with z constant across channels, the
     // per-channel gate reduces EXACTLY to the block scalar gate. The scalar
     // family is a subset of the channel family -- so a channel run can always
     // reproduce the block result, and any failure of channel is not

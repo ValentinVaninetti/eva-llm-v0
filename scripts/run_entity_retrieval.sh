@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Entity retrieval benchmark on the Quijote (GPT directive, 2026-08-15).
+# Entity retrieval benchmark on the Quijote (2026-08-15).
 # 4 combos: {T1, T13} x {independent, carry}, each val+train.
 cd "$(dirname "$0")/.."
 export EVA_GPU=1

@@ -220,6 +220,6 @@ fn main() {
         println!("  hidden state. Still alive: joint training with a small beta, control beta=0.");
     } else {
         println!("  pooled AUROC {global:.3} -- gray zone between 0.55 and 0.6. Not fully dead nor");
-        println!("  alive; decide with Dante/Valentin whether a second seed is worth it before building.");
+        println!("  alive; decide whether a second seed is worth it before building.");
     }
 }

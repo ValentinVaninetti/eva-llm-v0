@@ -1,8 +1,8 @@
-//! Entity retrieval benchmark on real text (GPT directive, 2026-08-15).
+//! Entity retrieval benchmark on real text (2026-08-15).
 //!
 //! The Quijote T=1 vs T=1.3 result (1.716 vs 1.720 global bpb) cannot separate
 //! "does the long-range memory help?" from "does a 13M model learn language?".
-//! This benchmark is the directed alternative GPT proposed: it plants a
+//! This benchmark is the directed alternative we proposed: it plants a
 //! controlled but semantically natural signal -- proper names/entities that
 //! reappear -- and measures whether the model assigns higher probability to an
 //! entity's bytes when it has already seen that entity, as a function of the

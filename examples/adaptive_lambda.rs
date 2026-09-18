@@ -1,11 +1,11 @@
-//! Round 3, Dante's recipe: per-position adaptive lambda (using the FREE
+//! Round 3, the recipe: per-position adaptive lambda (using the FREE
 //! signal of p[argmax], Step 1's result) against a fixed global lambda,
 //! kNN-LM style -- both in the SAME log-linear form, to isolate a single
 //! variable (adaptive vs fixed) and not mix it up with "log-linear vs
 //! probability space".
 //!
 //! FORMULA USED (spelled out explicitly, so it can be corrected if this
-//! isn't the exact intent -- Dante's message reuses "beta" in two formulas
+//! isn't the exact intent -- the message reuses "beta" in two formulas
 //! and a literal reading would square it in the adaptive case, which is
 //! almost certainly not the intent):
 //!
@@ -21,7 +21,7 @@
 //! touched exactly once for the final number.
 //!
 //! Does NOT touch `src/`: only `forward_hidden`, `Recall::lookup_detail`,
-//! `bet::classify_row`, all public. Zero new op, exactly as Dante asked.
+//! `bet::classify_row`, all public. Zero new op, exactly as we asked.
 
 use eva_llm_v0::bet::classify_row;
 use eva_llm_v0::data::TextDataset;
@@ -72,7 +72,7 @@ fn collect(model: &EvaModel, ds: &TextDataset, table: &Recall, windows: &[usize]
 
 /// bits/byte of the combination, over a set of positions, for a beta and a
 /// mode (adaptive or fixed). Returns (total_bpb, delegation_bpb, safe_bpb,
-/// n_delegation, n_safe) for the breakdown Dante asked for.
+/// n_delegation, n_safe) for the breakdown we asked for.
 fn bpb(positions: &[Pos], beta: f32, adaptive: bool) -> (f64, f64, f64, usize, usize) {
     let mut nats_total = 0.0f64;
     let (mut nats_deleg, mut nats_safe) = (0.0f64, 0.0f64);
@@ -178,7 +178,7 @@ fn main() {
 
     // Same per-zone breakdown but with the MODEL ALONE, to compare apples
     // to apples (not the isolated number, the delta against the baseline
-    // in the SAME zone) -- exactly what Dante explicitly asked for.
+    // in the SAME zone) -- exactly what was asked for.
     let (_, base_deleg, base_safe, ..) = bpb(&pos_val, 0.0, false);
 
     println!("\n=== bonus: where the gain comes from (adaptive vs model alone, by zone) ===");

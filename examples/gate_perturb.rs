@@ -1,4 +1,4 @@
-//! Claude's follow-up to the open question Dante/GPT left after the N-sweep:
+//! Follow-up to the open question left after the N-sweep:
 //! R2's gate settles at s~0.53 in every condition tested (block or channel,
 //! N=32/128/256). Is that a genuine optimum (opening further would hurt),
 //! or a gradient-magnitude artifact (opening further would help or be

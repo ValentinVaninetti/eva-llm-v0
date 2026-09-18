@@ -11,7 +11,7 @@ use crate::tensor::autograd::backward;
 use crate::tensor::Tensor;
 use crate::tokenizer::ByteTokenizer;
 
-// Round 4, GPT's second intervention on the flattening of `alpha`: a
+// Round 4, the second intervention on the flattening of `alpha`: a
 // periodic trace of `log_clock`'s gradient DURING training, not just at
 // the final checkpoint -- "I want to see where the trajectory starts to
 // diverge." Free: these are the SAME gradients already computed for the
@@ -143,7 +143,7 @@ impl WreadTrace {
         let n = self.n;
         for (bi, block) in model.blocks.iter().enumerate() {
             let Mixer::Clock(clock) = &block.mixer else { continue };
-            // R2 trace: the gate story, three numbers apart (Claude's ask):
+            // R2 trace: the gate story, three numbers apart (ask):
             //   z (raw pre-activation), s (gate WITH the floor), mean|s*read|
             //   (the effective contribution to the residual, measured in the
             //   op forward), and the mean |grad| of alpha_read/inv_beta/z
@@ -156,7 +156,7 @@ impl WreadTrace {
                 let g_z: f64 = self.grad_z[bi] / ng as f64;
                 let (eff, _eff_n) = crate::tensor::ops::r2_read_stats(ar.id).unwrap_or((0.0, 0));
                 if z.shape == vec![ar.shape[0]] {
-                    // R2-channel: the DISTRIBUTION of s[c] (GPT: save it, not
+                    // R2-channel: the DISTRIBUTION of s[c] (save it, not
                     // just bpb). Summary: mean/min/max s and the fractions at
                     // the floor (closed) and near 1 (open).
                     let (mut s_mean, mut s_min, mut s_max) = (0.0f64, f64::MAX, 0.0f64);
@@ -196,7 +196,7 @@ impl WreadTrace {
                 continue;
             }
             // R1c trace: how far the structured read (alpha_read, inv_beta)
-            // is from the physical clock (alpha_c, 1). GPT wants these two
+            // is from the physical clock (alpha_c, 1). we wants these two
             // traced through training to distinguish "gradient absent"
             // (params frozen at init), "present but bad trajectory" (moves
             // away), and "converging to a different solution" (moves, loss
@@ -250,7 +250,7 @@ impl WreadTrace {
 }
 
 // Round 3, final benchmark: the gate as a training regularizer, recipe
-// consolidated by Dante -- "teach where the table is deterministic, don't
+// consolidated independently -- "teach where the table is deterministic, don't
 const GATE_CAP: f32 = 7.7; // same cap Seneca used in adaptive_lambda.rs
 const GATE_H_HIGH: f32 = 2.0;
 const GATE_EPS: f32 = 1e-9;
@@ -314,7 +314,7 @@ pub struct TrainConfig {
     /// to before this recipe). Gated by the table's determinism, not by the
     /// model's confidence -- see the comment next to `inject_bias`.
     pub gate_beta: f32,
-    /// Round 4, GPT's hypothesis ("survival"): probability that EACH block
+    /// Round 4, the hypothesis ("survival"): probability that EACH block
     /// gets skipped, independently, on every step (0.0 = off, identical to
     /// before). Reuses `forward_skips` (already public, the same one
     /// `ceiling` uses) -- this is Stochastic Depth (Huang et al. 2016) at

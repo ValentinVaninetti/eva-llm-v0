@@ -11,8 +11,8 @@
 //! HOW IT'S MEASURED: training is split into windows of `every` steps. At
 //! the start and end of each window a snapshot of ALL parameters is taken
 //! (a clone of the buffer, not of the graph -- this doesn't touch
-//! `optim.rs` or `autograd.rs`, so it doesn't collide with anything Dante
-//! is working on). For each parameter we compute how much it moved,
+//! `optim.rs` or `autograd.rs`, so it does not collide with work in
+//! progress elsewhere). For each parameter we compute how much it moved,
 //! relative to its own size:
 //!
 //! ```text
@@ -22,7 +22,7 @@
 //! A parameter is "still in this window" if `ratio` didn't reach the
 //! threshold. A parameter is "settled" if it's been still for `streak`
 //! CONSECUTIVE windows -- if it moves for even a single window, the streak
-//! breaks. This is intentional: it's the same question Valentin's
+//! breaks. This is intentional: it's the same question the
 //! unfreezing mechanism would ask ("if it fails, it softens"), just on the
 //! freezing side. It's not sticky.
 //!

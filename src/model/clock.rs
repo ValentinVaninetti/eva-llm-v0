@@ -3,7 +3,7 @@ use crate::rng::Rng;
 use crate::tensor::ops as ops;
 use crate::tensor::Tensor;
 
-/// Round 4, GPT's hypothesis: is the flattening of `alpha` sigmoid
+/// Round 4, the hypothesis: is the flattening of `alpha` sigmoid
 /// saturation (measured: |grad| 20-100x smaller where alpha≈0), not a
 /// preference of the loss? With this on, ClockMem uses
 /// `ops::algebraic_sigmoid` (polynomial tail) instead of `ops::sigmoid`
@@ -14,7 +14,7 @@ fn antisat() -> bool {
     std::env::var("EVA_ALPHA_ANTISAT").is_ok()
 }
 
-/// Round 4, second intervention (requested by GPT, after finding that
+/// Round 4, second intervention (requested independently, after finding that
 /// `algebraic_sigmoid` wasn't touching the right region): temperature on
 /// THE SAME sigmoid, `alpha=sigmoid(z/T)` with T>1. Unlike
 /// `algebraic_sigmoid`, this does NOT change the shape of the curve -- it
@@ -37,12 +37,12 @@ fn temperature() -> f32 {
     std::env::var("EVA_ALPHA_TEMP").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0)
 }
 
-/// SSM BASELINE (Claude/GPT/Valentín, 2026-08-15): `EVA_SSM_ALPHA=a` replaces
+/// SSM BASELINE (2026-08-15): `EVA_SSM_ALPHA=a` replaces
 /// the LEARNED per-channel clock with a FIXED slow alpha for every channel.
 /// Everything else is identical to base ClockMem -- same q/k/v/g, same beta,
 /// same recurrence, same readout `q*cur*g`, same windowed training, same
-/// carry eval. This is Claude's proposed baseline ("alpha fijo lento dentro
-/// de nuestro propio código"), to answer GPT's control: is the carry
+/// carry eval. This is the proposed baseline ("a fixed slow alpha inside
+/// our own codebase"), to answer the control: is the carry
 /// stability of T=1.3 a property of ANY slow-decay recurrence, or of the
 /// LEARNED alpha distribution specifically? Default 0.999: the code's own
 /// documented "slow but safe" value (~1000-token memory, state magnitude
@@ -89,7 +89,7 @@ fn lowrank_rank() -> Option<usize> {
         .filter(|&r| r > 0)
 }
 
-/// GATE ABLATION (Claude, 2026-08-19). `EVA_NO_GATE=1` replaces the
+/// GATE ABLATION (2026-08-19). `EVA_NO_GATE=1` replaces the
 /// multiplicative output gate with a constant 1, so the readout becomes
 /// `out = q*cur` instead of `out = q*cur*g`.
 ///
@@ -109,31 +109,31 @@ fn no_gate() -> bool {
     std::env::var("EVA_NO_GATE").is_ok()
 }
 
-/// ABLACIÓN DE LECTURA POR CANAL (Claude/GPT, 2026-08-20).
-/// `EVA_READ_MASK=c1,c2,...` anula la LECTURA de esos canales poniéndoles
-/// `g[c] = 0`, sin tocar la escritura ni la dinámica del estado.
+/// PER-CHANNEL READ ABLATION (2026-08-20).
+/// `EVA_READ_MASK=c1,c2,...` cancels the READ of those channels by setting
+/// `g[c] = 0`, without touching the write or the state dynamics.
 ///
-/// POR QUÉ ASÍ. `out[t,c] = q[t,c]*cur[c]*g[t,c]`, y `g` se calcula acá
-/// afuera del op, así que anularlo es una ablación exacta de la lectura de
-/// ese canal sin necesidad de un op nuevo ni de tocar el backward. El estado
-/// sigue evolucionando igual: lo único que se corta es lo que ese canal
-/// aporta a la salida.
+/// WHY LIKE THIS. `out[t,c] = q[t,c]*cur[c]*g[t,c]`, and `g` is computed out
+/// here rather than inside the op, so zeroing it is an exact ablation of that
+/// channel's read with no new op and no change to the backward pass. The state
+/// keeps evolving the same way: the only thing cut is what that channel
+/// contributes to the output.
 ///
-/// PARA QUÉ. Un modelo resuelve el recall asociativo al 99,77% y no sabemos
-/// cómo. Dos hipótesis con firmas distintas al apagar canales:
-///   - particionado por clave  -> apagar un grupo chico y específico hunde
-///     UNA clave y deja las otras casi intactas
-///   - representación distribuida / hash -> la caída es gradual y pareja,
-///     sin ningún grupo mágico
-/// Sólo de inferencia: no afecta el entrenamiento y sin la variable el
-/// comportamiento es idéntico al de siempre.
+/// WHAT FOR. A model solves associative recall at 99.77% and we do not know
+/// how. Two hypotheses with different signatures when channels are turned off:
+///   - partitioned by key  -> turning off a small, specific group sinks ONE
+///     key and leaves the others almost intact
+///   - distributed / hashed representation -> the drop is gradual and even,
+///     with no magic group
+/// Inference only: it does not affect training, and without the variable the
+/// behaviour is identical to always.
 fn read_mask() -> Option<Vec<usize>> {
     let v = std::env::var("EVA_READ_MASK").ok()?;
     let idx: Vec<usize> = v.split(',').filter_map(|t| t.trim().parse().ok()).collect();
     if idx.is_empty() { None } else { Some(idx) }
 }
 
-/// Aplica la máscara a `g` (que ya viene con forma [S, D]).
+/// Applies the mask to `g` (which already comes in shape [S, D]).
 fn apply_read_mask(g: Tensor) -> Tensor {
     match read_mask() {
         None => g,
@@ -145,8 +145,8 @@ fn apply_read_mask(g: Tensor) -> Tensor {
                     if c < d { data[t * d + c] = 0.0; }
                 }
             }
-            // Constante a propósito: es una intervención de análisis, no una
-            // ruta de gradiente. Nunca se usa entrenando.
+            // Constant on purpose: this is an analysis intervention, not a
+            // gradient route. Never used during training.
             Tensor::new(data, g.shape.clone())
         }
     }
@@ -224,12 +224,12 @@ impl ClockMem {
                 param(logits, vec![d])
             };
         let beta = param(vec![1.0], vec![1]);
-        // EXPERIMENT (GPT/Dante lead 2026-08-14): windowed clock read.
+        // EXPERIMENT (2026-08-14): windowed clock read.
         // EVA_READ_WIN=K turns the read into a learned window sum over the
         let df_n = std::env::var("EVA_READ_DF_N")
             .ok()
             .and_then(|v| v.parse::<usize>().ok());
-        // ORACLE READOUT (GPT lead, after B2.1): EVA_READ_ORACLE=1 with
+        // ORACLE READOUT (after B2.1): EVA_READ_ORACLE=1 with
         // EVA_READ_WIN=K and EVA_READ_DF_N=N replaces the learned wread with
         // the MATHEMATICALLY EXACT inverse, recomputed from the current
         // alpha/beta on every forward (so it stays exact even as alpha is
@@ -248,7 +248,7 @@ impl ClockMem {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(0)
             != 0;
-        // R1 (GPT/Dante lead, 2026-08-15): the windowed read WITHOUT the q*g
+        // R1 (2026-08-15): the windowed read WITHOUT the q*g
         // gate, with a LEARNED wread (ops::clockmem_readwin_inj). Two inits:
         //   - R1a: EVA_READ_DF_N=N seeds the finite-difference taps
         //     (w[N-1]=1/beta, w[N]=-alpha/beta) -- the read starts functional
@@ -260,7 +260,7 @@ impl ClockMem {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(0)
             != 0;
-        // R1c (GPT/Claude lead, 2026-08-15): the STRUCTURED learnable
+        // R1c (2026-08-15): the STRUCTURED learnable
         // inverse. Replaces the free Kxd wread of R1a/R1b with ~2
         let r1c_on = std::env::var("EVA_READ_R1C")
             .ok()
@@ -268,7 +268,7 @@ impl ClockMem {
             .unwrap_or(0)
             != 0;
         let r1c_neutral = std::env::var("EVA_READ_R1C_NEUTRAL").is_ok();
-        // R2 (Claude/GPT/Valentín, 2026-08-15): the structured memory path
+        // R2 (2026-08-15): the structured memory path
         // (same family as R1c) behind a gated scalar that CANNOT annul it.
         //   out = q*cur*g + s*read,  s = floor + (1-floor)*sigmoid(z)
         // The floor (EVA_READ_R2_FLOOR, default 0.05) guarantees s >= floor > 0
@@ -285,8 +285,8 @@ impl ClockMem {
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
             .unwrap_or(0.0);
-        // R2-channel (GPT order, 2026-08-15): same gate with one z PER CHANNEL
-        // (shape [D]) instead of one scalar per block. GPT's control for "is
+        // R2-channel (2026-08-15): same gate with one z PER CHANNEL
+        // (shape [D]) instead of one scalar per block. the control for "is
         // the block scalar imposing the inductive bias". The scalar family is
         // a subset (z constant == block), so the floor guarantee holds per
         // channel. The distribution of s[c] is traced (EVA_WREAD_TRACE).

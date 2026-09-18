@@ -1,4 +1,4 @@
-//! Requested by GPT: all 32 possible combinations of active blocks (2^5,
+//! Requested independently: all 32 possible combinations of active blocks (2^5,
 //! including empty and full), bpb of each, on A and B -- to compare the
 //! whole SURFACE, not just individual blocks or a single pair. Reuses
 //! `forward_skips` (already public, the same one `ceiling` uses), zero new

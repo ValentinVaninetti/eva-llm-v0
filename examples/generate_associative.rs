@@ -1,4 +1,4 @@
-//! Generator for the ASSOCIATIVE RECALL benchmark (Claude, 2026-08-16),
+//! Generator for the ASSOCIATIVE RECALL benchmark (2026-08-16),
 //! proposed after the entity-retrieval result on the Quijote showed that
 //! neither T=1, T=1.3, nor a fixed-slow-decay SSM ever beat the no-memory
 //! reference at long range (see PAPER-DRAFT.md 4.7-4.9).

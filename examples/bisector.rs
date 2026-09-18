@@ -1,4 +1,4 @@
-//! Task 1 from TRABAJO-2026-08-12.md: does halving bisection locate the
+//! Does halving bisection locate the
 //! first error within a bad span, or is there something better with what
 //! we already have?
 //!

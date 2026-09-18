@@ -1,4 +1,4 @@
-//! Round 3, the task: "confident and wrong" -- the inverse side of
+//! "Confident and wrong" -- the inverse side of
 //! "that it bets." The safe zone (p[argmax] >= 0.8) doesn't get touched by
 //! the gate and gives 0.0000 difference -- but it still has errors (0.79
 //! bpb isn't zero) and nobody measured WHERE they fall.
@@ -14,7 +14,7 @@
 //! Does NOT touch `src/`: only `forward_hidden`, `classify_row`,
 //! `Recall::lookup_detail`, all public, zero new op.
 //!
-//! Extension (the task, "entropy-by-count"): the theory to
+//! Entropy-by-count: the theory to
 //! explain the reversal above with a single cause -- high count might not
 //! mean "common, reliable context" but rather "low-information context"
 //! (a generic fragment with more valid continuations). Measured directly:
@@ -22,8 +22,7 @@
 //! (re-aggregation, no new op), by count band. The number that kills it:
 //! if H doesn't grow with count, the theory falls right here.
 //!
-//! Second extension (closing the "the head" / deliberation
-//! thread): H(p), the Shannon entropy of the MODEL's output distribution
+//! H(p), the Shannon entropy of the MODEL's output distribution
 //! (not the table's -- that's H(q), above). It's the free, single-pass
 //! approximation to "if I were made to generate again, how much would I
 //! disagree with myself" -- the cost of a real multi-sample approach

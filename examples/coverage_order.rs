@@ -14,7 +14,7 @@
 use eva_llm_v0::data::TextDataset;
 use eva_llm_v0::recall::Recall;
 
-/// STEP 0 of the auxiliary-signal proposal (TRABAJO-2026-08-12.md): the bar
+/// STEP 0 of the auxiliary-signal proposal: the bar
 /// that governs the two candidates (agreement head / sum of logits) isn't
 /// arbitrary, it's "the table is already right almost always." If
 /// argmax(table) == truth is already ~97% where the count is high, any new

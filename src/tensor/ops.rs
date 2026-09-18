@@ -219,7 +219,8 @@ pub fn sigmoid(x: &Tensor) -> Tensor {
 
 /// Squashing R->(0,1) with a POLYNOMIAL tail instead of an exponential one:
 /// the derivative decays as 1/|z|^3 (`sigmoid` decays as exp(-|z|)) -- much
-/// more signal survives far from the center. Exists for Round 4, the /// hypothesis: if the flattening of `alpha` in ClockMem is sigmoid
+/// more signal survives far from the center. Exists to test whether the
+/// flattening of `alpha` in ClockMem is sigmoid
 /// saturation (measured: |grad| 20-100x smaller in the fast band) and not a
 /// preference of the loss, this op should let gradient keep arriving even
 /// with alpha near 0.

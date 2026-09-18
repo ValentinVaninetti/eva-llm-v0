@@ -11,7 +11,7 @@ use crate::tensor::autograd::backward;
 use crate::tensor::Tensor;
 use crate::tokenizer::ByteTokenizer;
 
-// Round 4, the second intervention on the flattening of `alpha`: a
+// Second intervention on the flattening of `alpha`: a
 // periodic trace of `log_clock`'s gradient DURING training, not just at
 // the final checkpoint -- "I want to see where the trajectory starts to
 // diverge." Free: these are the SAME gradients already computed for the
@@ -143,7 +143,7 @@ impl WreadTrace {
         let n = self.n;
         for (bi, block) in model.blocks.iter().enumerate() {
             let Mixer::Clock(clock) = &block.mixer else { continue };
-            // R2 trace: the gate story, three numbers apart (ask):
+            // R2 trace: the gate story, three numbers apart:
             //   z (raw pre-activation), s (gate WITH the floor), mean|s*read|
             //   (the effective contribution to the residual, measured in the
             //   op forward), and the mean |grad| of alpha_read/inv_beta/z
@@ -249,7 +249,7 @@ impl WreadTrace {
     }
 }
 
-// Round 3, final benchmark: the gate as a training regularizer, recipe
+// Final benchmark: the gate as a training regularizer, recipe
 // consolidated independently -- "teach where the table is deterministic, don't
 const GATE_CAP: f32 = 7.7; // same cap Seneca used in adaptive_lambda.rs
 const GATE_H_HIGH: f32 = 2.0;
@@ -314,7 +314,7 @@ pub struct TrainConfig {
     /// to before this recipe). Gated by the table's determinism, not by the
     /// model's confidence -- see the comment next to `inject_bias`.
     pub gate_beta: f32,
-    /// Round 4, the hypothesis ("survival"): probability that EACH block
+    /// The "survival" hypothesis: probability that EACH block
     /// gets skipped, independently, on every step (0.0 = off, identical to
     /// before). Reuses `forward_skips` (already public, the same one
     /// `ceiling` uses) -- this is Stochastic Depth (Huang et al. 2016) at

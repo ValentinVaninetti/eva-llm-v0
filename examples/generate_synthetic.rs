@@ -3,8 +3,8 @@
 //!
 //! Structure: per window, an N-byte uniform seed + recurrence
 //! y[t] = F(x[t-N]) with F a FIXED permutation shared across conditions
-//! (derived from PHYSICS_SEED, recorded here and in
-//! TRABAJO-2026-08-14.md). The window is self-contained: the dependency
+//! (derived from PHYSICS_SEED, recorded here). The window is
+//! self-contained: the dependency
 //! never crosses the window boundary as long as N < seq, which is why the
 //! experiment runs with seq=512 fixed.
 //!

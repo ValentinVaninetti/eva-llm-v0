@@ -1,4 +1,4 @@
-//! Round 3, the recipe: per-position adaptive lambda (using the FREE
+//! Per-position adaptive lambda (using the FREE
 //! signal of p[argmax], Step 1's result) against a fixed global lambda,
 //! kNN-LM style -- both in the SAME log-linear form, to isolate a single
 //! variable (adaptive vs fixed) and not mix it up with "log-linear vs

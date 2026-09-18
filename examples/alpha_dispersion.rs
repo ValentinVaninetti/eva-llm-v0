@@ -33,7 +33,7 @@ fn main() {
         };
         // alpha = squash(log_clock), same as in forward() -- respects
         // EVA_ALPHA_ANTISAT because the checkpoint might have trained with
-        // algebraic_sigmoid instead of sigmoid (Round 4, the hypothesis).
+        // algebraic_sigmoid instead of sigmoid.
         let antisat = std::env::var("EVA_ALPHA_ANTISAT").is_ok();
         let alphas: Vec<f32> = clock.log_clock.data.iter().map(|&lc| {
             // BUG FIXED (2026-08-24): this probe ignored EVA_ALPHA_TEMP and

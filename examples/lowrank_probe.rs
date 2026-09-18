@@ -1,4 +1,4 @@
-//! Task #58: did the low-rank write's parameters actually MOVE, or do they
+//! Did the low-rank write's parameters actually MOVE, or do they
 //! just exist? `po` starts at exactly zero, so its norm is the cleanest
 //! possible read of "this path is alive": if it is still 0 after training,
 //! the whole low-rank branch contributed nothing and any result from the run

@@ -1,4 +1,4 @@
-//! Round 4, next piece flagged independently: the kid doesn't learn from its
+//! The kid doesn't learn from its
 //! mistakes WHILE IN USE. The table gets built once from train and after
 //! that it's read-only -- when the final system errs and the real answer
 //! arrives (here: the corpus's real byte, simulating streaming/

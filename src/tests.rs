@@ -1233,7 +1233,7 @@ fn lowrank_with_zero_po_equals_base_clockmem() {
     }
 }
 
-/// Task #58, and this is the test that matters most: "the code touches the
+/// The test that matters most: "the code touches the
 /// new parameters" is NOT "the new parameters learn". This checks the
 /// EFFECT -- that gradient actually reaches all five tensors -- and pins
 /// down the one-step delay the zero init of `po` implies, so nobody

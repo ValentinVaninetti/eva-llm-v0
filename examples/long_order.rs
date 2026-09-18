@@ -1,4 +1,4 @@
-//! Round 4, the task ("Number 1, free"): is the table's bottleneck
+//! Is the table's bottleneck
 //! CONTEXT (order 8 cuts off information that would disambiguate further
 //! back) or DATA (even looking further back, the corpus genuinely has more
 //! than one valid continuation)? This separates them by re-building the

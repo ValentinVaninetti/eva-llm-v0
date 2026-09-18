@@ -3,7 +3,7 @@ use crate::rng::Rng;
 use crate::tensor::ops as ops;
 use crate::tensor::Tensor;
 
-/// Round 4, the hypothesis: is the flattening of `alpha` sigmoid
+/// Is the flattening of `alpha` sigmoid
 /// saturation (measured: |grad| 20-100x smaller where alpha≈0), not a
 /// preference of the loss? With this on, ClockMem uses
 /// `ops::algebraic_sigmoid` (polynomial tail) instead of `ops::sigmoid`
@@ -14,8 +14,8 @@ fn antisat() -> bool {
     std::env::var("EVA_ALPHA_ANTISAT").is_ok()
 }
 
-/// Round 4, second intervention (requested independently, after finding that
-/// `algebraic_sigmoid` wasn't touching the right region): temperature on
+/// Second intervention, after finding that `algebraic_sigmoid` was not
+/// touching the right region: temperature on
 /// THE SAME sigmoid, `alpha=sigmoid(z/T)` with T>1. Unlike
 /// `algebraic_sigmoid`, this does NOT change the shape of the curve -- it
 /// stretches the same sigmoid, so a given `z` (the same one any channel
@@ -185,7 +185,7 @@ pub struct ClockMem {
     pub alpha_read: Option<Tensor>,
     pub inv_beta: Option<Tensor>,
     pub gate_z: Option<Tensor>,
-    /// Task #58, low-rank outer-product write: the four rank-r projections
+    /// Low-rank outer-product write: the four rank-r projections
     /// and the per-slot clock of the matrix state. All Some together or all
     /// None; created only when EVA_WRITE_LOWRANK=r.
     pub pk: Option<Tensor>,
@@ -224,7 +224,7 @@ impl ClockMem {
                 param(logits, vec![d])
             };
         let beta = param(vec![1.0], vec![1]);
-        // EXPERIMENT (2026-08-14): windowed clock read.
+        // Windowed clock read.
         // EVA_READ_WIN=K turns the read into a learned window sum over the
         let df_n = std::env::var("EVA_READ_DF_N")
             .ok()
@@ -349,7 +349,7 @@ impl ClockMem {
                     param(data, vec![k, d])
                 })
         };
-        // Task #58: the low-rank write's parameters.
+        // The low-rank write's parameters.
         //
         let (pk, pv, pq, po, log_clock_m) = match lowrank_rank() {
             None => (None, None, None, None, None),
@@ -529,7 +529,7 @@ impl ClockMem {
         Some((self.alpha_read.as_ref()?, self.inv_beta.as_ref()?, self.gate_z.as_ref()?, floor, n))
     }
 
-    /// Task #58: the low-rank write's five tensors, all-or-nothing.
+    /// The low-rank write's five tensors, all-or-nothing.
     fn lowrank_parts(&self) -> Option<(&Tensor, &Tensor, &Tensor, &Tensor, &Tensor)> {
         Some((
             self.pk.as_ref()?,

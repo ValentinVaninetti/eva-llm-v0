@@ -1,4 +1,4 @@
-//! Round 3, Step 1: the detached probe, against the REAL bar (~53%, not
+//! The detached probe, against the REAL bar (~53%, not
 //! ~97%).
 //!
 //! Same question that killed the before-spending stake, applied to

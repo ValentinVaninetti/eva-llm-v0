@@ -1,26 +1,23 @@
 //! Knowledge in a table, not in the weights.
 //!
-//! THIS EXISTS TO DECIDE THE PROJECT'S CENTRAL HYPOTHESIS:
+//! This exists to decide the project's central hypothesis: can what needs to
+//! GENERALIZE be separated from what only needs to BE REMEMBERED, without
+//! losing the ability to reason over what was remembered? If yes, the cost of
+//! LLMs collapses -- facts are a huge amount of information and need no
+//! distributed representation, while the structure of language is little and
+//! does. Today the cost of generalization is paid to store things that only
+//! need remembering.
 //!
-//! > Can what needs to **generalize** be separated from what only needs to
-//! > **be remembered**, without losing the ability to reason over what was
-//! > remembered?
-//!
-//! If the answer is yes, the cost of LLMs collapses: facts are a huge
-//! amount of information and don't need distributed representation; the
-//! structure of language is little and does need it. Today the cost of
-//! generalization is being paid to store things that only need remembering.
-//!
-//! THE PUREST WAY TO TEST IT is the dumbest one: a table of exact k-grams
-//! from the training text. Zero parameters, zero training, it's literally a
-//! lookup table. If **half the model plus the table** matches the full
-//! model, the hypothesis holds. If not, the knowledge in the weights was
-//! doing something a table doesn't replace -- and that's worth knowing too.
+//! The purest test is the dumbest: a table of exact k-grams from the training
+//! text. Zero parameters, zero training, literally a lookup. If half the model
+//! plus the table matches the full model, the hypothesis holds. If not, the
+//! knowledge in the weights was doing something a table does not replace --
+//! also worth knowing.
 //!
 //! NOTHING IS TUNED AGAINST VALIDATION. The mixing weight is chosen on a
-//! development slice separate from training; validation is touched exactly
-//! once, at the end. Tuning the mix while looking at the exam would give a
-//! nice-looking, fake number.
+//! development slice separate from training, and validation is touched exactly
+//! once, at the end. Tuning the mix while looking at the exam would produce a
+//! good-looking, fake number.
 
 use std::collections::HashMap;
 

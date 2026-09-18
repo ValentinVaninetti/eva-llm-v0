@@ -1,32 +1,24 @@
-//! Generator for the long-range benchmark's synthetic corpus (lead
-//! decision 2026-08-14).
+//! Generator for the long-range benchmark's synthetic corpus.
 //!
-//! Structure: per window, an N-byte uniform seed + recurrence
-//! y[t] = F(x[t-N]) with F a FIXED permutation shared across conditions
-//! (derived from PHYSICS_SEED, recorded here). The window is
-//! self-contained: the dependency
-//! never crosses the window boundary as long as N < seq, which is why the
-//! experiment runs with seq=512 fixed.
+//! Per window: an N-byte uniform seed, then y[t] = F(x[t-N]) with F a FIXED
+//! permutation shared across conditions (derived from PHYSICS_SEED, recorded
+//! here). The window is self-contained -- the dependency never crosses the
+//! boundary as long as N < seq -- which is why seq is fixed at 512.
 //!
-//! Position convention (dataset of windows that overlap by 1 byte):
-//! - window i covers absolute positions [i*seq, (i+1)*seq];
-//! - the first N are a uniform seed;
-//! - the rest (and the last byte of the last window) is x[p] = F(x[p-N]);
-//! - the last position of each window i < win-1 gets overwritten by the
-//!   next window's seed; that's why the "recurrent" region the eval
-//!   measures is [i*seq+N, (i+1)*seq) (half-open), and the eval counts it
-//!   with the same rule (see examples/mask_eval.rs).
+//! Position convention (windows overlap by 1 byte): window i covers absolute
+//! [i*seq, (i+1)*seq]; the first N bytes are the seed; the rest is
+//! x[p] = F(x[p-N]); the last position of each window i < win-1 is overwritten
+//! by the next window's seed. Hence the recurrent region the eval measures is
+//! the half-open [i*seq+N, (i+1)*seq), and `mask_eval.rs` counts it the same.
+//!
+//! Self-check: verifies the recurrence byte for byte in the recurrent region of
+//! the first 8 windows, and that the seed marginal is flat under sampling.
 //!
 //! USAGE: cargo run --release --example generate_synthetic -- <N> <seq> <win> <seed> <out>
 //!   N    dependency distance (8, 32, 128, 256; 2 for the local control)
-//!   seq  window length (512 fixed in this benchmark)
-//!   win  number of windows (~2500; each one generates seq bytes)
-//!   seed DATA seed for this corpus (recorded; F doesn't depend on it)
-//!   out  output file (data/sintetico_...)
-//!
-//! Self-check: verifies the recurrence holds byte for byte in the
-//! recurrent region of the first 8 windows, and that the seed marginal is
-//! flat under sampling.
+//!   seq  window length (512 fixed here)
+//!   win  number of windows (~2500, each generating seq bytes)
+//!   seed DATA seed for this corpus (recorded; F does not depend on it)
 
 use eva_llm_v0::rng::Rng;
 

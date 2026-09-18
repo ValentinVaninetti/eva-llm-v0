@@ -1,27 +1,28 @@
-//! Activation-localization probe for the ORACLE readout. It started as a
-//! hunt for a "signal death" between the recovered write and the logits
-//! (state_probe B had shown the write ~84% linearly decodable). After the
-//! oracle fix (EVA_READ_INJECT, w[N] tap) the picture is clean and the
-//! premise is obsolete: the write survives 100% and the model solves.
+//! Activation-localisation probe for the ORACLE readout.
 //!
-//! The recovered write is put into `read[t]` by construction (the oracle
-//! taps are exact). We fit ridge probes at masked positions t >= N on each
+//! It began as a hunt for "signal death" between the recovered write and the
+//! logits (state_probe B had shown the write ~84% linearly decodable). After
+//! the oracle fix (EVA_READ_INJECT, w[N] tap) the premise is obsolete: the
+//! write survives 100% and the model solves the task. Kept because the
+//! per-stage decodability is still the map of where the signal is.
+//!
+//! The recovered write is placed into `read[t]` by construction (the oracle
+//! taps are exact). Ridge probes are fit at masked positions t >= N on each
 //! intermediate:
 //!
-//!   per block:  read[t] (recovered write, pre-q*g)
-//!               m[t]    = q[t]*read[t]*g[t]         (mixer output)
-//!               h2[t]   = h[t] + m[t]               (post-residual)
-//!               out[t]  = h2[t] + glu(norm2(h2))    (block output)
-//!   final:      hidden  (pre output RMSNorm)
-//!               head_in (post output RMSNorm, pre head linear)
+//!   per block  read[t]  recovered write, pre-q*g
+//!              m[t]     = q[t]*read[t]*g[t]        mixer output
+//!              h2[t]    = h[t] + m[t]              post-residual
+//!              out[t]   = h2[t] + glu(norm2(h2))   block output
+//!   final      hidden   pre output RMSNorm
+//!              head_in  post output RMSNorm, pre head linear
 //!
-//! Label = input[t-N+1] (untransformed value carried by the write). The
-//! model's own output is F(input[t-N+1]) (the generator applies the fixed
-//! permutation F), so its top-1 acc is scored against F(label); the ridge
-//! probes fit the untransformed token directly since F is a fixed bijection.
+//! Label = input[t-N+1], the untransformed value the write carries. The model's
+//! own output is F(input[t-N+1]), so its top-1 is scored against F(label) while
+//! the probes fit the untransformed token directly -- F is a fixed bijection.
 //!
 //! USAGE: cargo run --release --example activation_probe -- <weights> <data> <N> [train_windows]
-//!   requires EVA_READ_WIN=K, EVA_READ_DF_N=N, EVA_READ_INJECT=1 set.
+//!   requires EVA_READ_WIN=K, EVA_READ_DF_N=N, EVA_READ_INJECT=1.
 
 use eva_llm_v0::data::TextDataset;
 use eva_llm_v0::model::block::Mixer;

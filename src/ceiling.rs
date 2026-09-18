@@ -1,28 +1,20 @@
-//! RETROSPECTIVE CEILING -- the first number of compute-by-influence.
+//! RETROSPECTIVE CEILING: how much can be saved, at most, by skipping blocks
+//! that do not change the answer?
 //!
-//! THIS EXISTS TO DECIDE WHETHER CONDITIONAL COMPUTE HAS ROOM IN EVA:
-//!
-//! > How much can be saved, at most, by skipping blocks that don't change
-//! > the answer?
-//!
-//! The full model is run over UNSEEN text and then repeated with one block
-//! left out at a time (the residual stream passes through the block as if
-//! it weren't there). For each variant we measure:
-//!
-//! * bits/byte -- quality;
-//! * prediction change -- how many positions change argmax;
-//! * wall time -- the physical cost, measured (the house rule);
-//! * block weights -- the traffic that no longer gets read.
+//! The full model runs over UNSEEN text, then again with one block left out at
+//! a time (the residual stream passes through as if it were not there), and
+//! each variant is measured on bits/byte, how many positions change argmax,
+//! wall time (the physical cost, per house rule), and the block weights no
+//! longer read.
 //!
 //! The ceiling is what an ideal rule that already knew each block's effect
-//! would have saved: it's not what a runtime gate would achieve, it's how
-//! much can be gained at most. If dropping blocks barely hurts quality,
-//! there's real room for a mechanism that skips them; if dropping any of
-//! them destroys quality, the line dies here without ever writing the
-//! scheduler.
+//! would have saved -- not what a runtime gate would achieve, but the most
+//! there is to gain. If dropping blocks barely hurts quality there is room for
+//! a mechanism that skips them; if dropping any destroys quality, the line dies
+//! here and the scheduler never gets written.
 //!
-//! Nothing is tuned against this number: it's a measurement on validation,
-//! with the same contiguous cut `train` used.
+//! Nothing is tuned against this number: it is measured on validation, using
+//! the same contiguous cut as training.
 
 use std::time::Instant;
 

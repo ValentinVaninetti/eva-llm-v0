@@ -1,35 +1,29 @@
-//! "Confident and wrong" -- the inverse side of
-//! "that it bets." The safe zone (p[argmax] >= 0.8) doesn't get touched by
-//! the gate and gives 0.0000 difference -- but it still has errors (0.79
-//! bpb isn't zero) and nobody measured WHERE they fall.
+//! "Confident and wrong": where the errors fall in the zone the gate never
+//! touches.
 //!
-//! the hypothesis: confident errors concentrate where the context is
-//! RARE in the table (low count) -- confidence that exceeds coverage. If
-//! the "high confidence x rare context" cell has the SAME precision as
-//! "high confidence x common context", there's no overreach and the point
-//! closes. If it stands out, the "curious gate" is born.
+//! The safe zone (p[argmax] >= 0.8) shows 0.0000 difference under the gate, but
+//! it still has errors -- 0.79 bpb is not zero -- and nobody measured where.
+//! The hypothesis is that confident errors concentrate where the context is
+//! RARE in the table: confidence exceeding coverage. If "high confidence x rare
+//! context" has the SAME precision as "high confidence x common context", there
+//! is no overreach and the line closes; if it stands out, the "curious gate" is
+//! born. One pass: MODEL precision (not the table's) cross-tabbed by p[argmax]
+//! decile x count band (miss / c=2 / 3-9 / 10-49 / 50+).
 //!
-//! A single pass: MODEL precision (not the table's) cross-tabbed by
-//! p[argmax] decile x context count-band (miss / c=2 / 3-9 / 10-49 / 50+).
-//! Does NOT touch `src/`: only `forward_hidden`, `classify_row`,
-//! `Recall::lookup_detail`, all public, zero new op.
+//! Two follow-ups share the pass, each with the number that kills it:
 //!
-//! Entropy-by-count: the theory to
-//! explain the reversal above with a single cause -- high count might not
-//! mean "common, reliable context" but rather "low-information context"
-//! (a generic fragment with more valid continuations). Measured directly:
-//! Shannon H(q) over the distribution `lookup_detail` already returns
-//! (re-aggregation, no new op), by count band. The number that kills it:
-//! if H doesn't grow with count, the theory falls right here.
+//!   H(q) by count band -- the theory that high count means "low-information
+//!     context" (a generic fragment with more valid continuations) rather than
+//!     "common, reliable context". Dies if H does not grow with count.
+//!   H(p), entropy of the MODEL's output -- the free single-pass stand-in for
+//!     "if made to generate again, how much would I disagree with myself",
+//!     without paying for self-consistency or debate. Dies if it separates
+//!     nothing that p[argmax] does not already separate.
 //!
-//! H(p), the Shannon entropy of the MODEL's output distribution
-//! (not the table's -- that's H(q), above). It's the free, single-pass
-//! approximation to "if I were made to generate again, how much would I
-//! disagree with myself" -- the cost of a real multi-sample approach
-//! (self-consistency/debate), without paying for it. The number that
-//! kills it: if H(p) doesn't separate anything `p[argmax]` doesn't
-//! already separate, the cheap "deliberation" line closes. Re-aggregation
-//! over already-computed logits, zero new op.
+//! Touches no `src/`: `forward_hidden`, `classify_row` and
+//! `Recall::lookup_detail` are public, and both follow-ups are re-aggregations
+//! over already-computed values. Zero new ops.
+
 
 use eva_llm_v0::bet::classify_row;
 use eva_llm_v0::data::TextDataset;

@@ -1,26 +1,21 @@
 //! Token-by-token inference, carrying state.
 //!
-//! WHY THIS EXISTS, with the waste measured: `generate` used to redo the
-//! full pass over the whole window **for every token**, and out of the 64
-//! rows it computed it used ONE and threw away 63. With `seq=64` that's up
-//! to 64x of wasted work per token. On top of that it built the whole
-//! autograd graph --with its per-operation input clones-- just to discard
-//! it right away.
+//! WHY, with the waste measured: `generate` used to redo the full pass over the
+//! whole window for EVERY token, computing 64 rows to use one and throw away
+//! 63 -- up to 64x wasted work per token at seq=64 -- and it built the entire
+//! autograd graph, with its per-op input clones, only to discard it.
 //!
-//! WHAT MAKES THIS POSSIBLE is the property that sets this architecture
-//! apart: `ClockMem`'s state is **fixed size**, D numbers, no matter how
-//! long the context is. A transformer can't do this: it needs a
-//! key/value cache that **grows with every token**. Both are implemented
-//! here, precisely so that difference can be measured instead of just
-//! claimed.
+//! WHAT MAKES IT POSSIBLE is the property that sets this architecture apart:
+//! ClockMem's state is FIXED SIZE, D numbers, however long the context. A
+//! transformer cannot do this; it needs a key/value cache that grows with every
+//! token. Both are implemented here precisely so that difference can be
+//! measured instead of claimed.
 //!
-//! THE DANGER, and the reason the test got written before the code: this is
-//! a **second implementation of the same math**. The two paths can drift
-//! out of sync silently -- the training one stays correct and the fast one
-//! computes something else, without anything failing. That's why
-//! `tests::stream_matches_batch` requires that, step by step, it gives the
-//! same result as the full pass. If that test ever goes red, this file is
-//! the one that's lying.
+//! THE DANGER, and why the test was written before the code: this is a SECOND
+//! implementation of the same maths. The two paths can drift apart silently --
+//! training stays correct while the fast path computes something else, with
+//! nothing failing. `tests::stream_matches_batch` demands step-by-step equality
+//! with the full pass. If that test goes red, this file is the one lying.
 
 use crate::model::block::Mixer;
 use crate::model::EvaModel;

@@ -1,33 +1,27 @@
 //! What can come next. Interchangeable pieces.
 //!
-//! TWO DIFFERENT THINGS, and only the first one existed here before:
+//! Two different things, and only the first existed here before:
+//!   1. NOT CHOOSING WRONG. A mask over the logits already did that.
+//!   2. NOT WASTING COMPUTE. The mask did not, because it applied *after*
+//!      computing all 256 logits: the model did the full work, then the
+//!      illegal part was thrown away.
 //!
-//! 1. **Not choosing wrong.** A mask over the logits already achieved that.
-//! 2. **Not wasting compute.** The mask did NOT achieve that, because it was
-//!    applied *after* computing all 256 logits: the model did the full work
-//!    and then the illegal part got thrown away.
+//! The difference is WHEN it is asked. Consulted *before* the step, the
+//! constraint can say "only this can come next": with a single continuation
+//! nothing is decided, it is emitted and the output projection is never
+//! computed; with k continuations, k columns of the head are computed instead
+//! of the whole vocabulary.
 //!
-//! The difference is in WHEN it gets asked. If the constraint is consulted
-//! **before** the step, it can say "only this can come next" and then:
+//! In this byte-level model the head is `dim x 256`, ~2.5% of the per-token
+//! work, so the saving barely shows. With a 32k vocabulary the head becomes
+//! `dim x 32000` and dominates the per-token cost. There it is not a detail.
 //!
-//! - With **a single** possible continuation there's nothing to decide: it
-//!   gets emitted and the output projection isn't computed at all.
-//! - With **k** continuations, k columns of the head get computed instead
-//!   of the whole vocabulary.
-//!
-//! HOW MUCH THAT'S WORTH depends on the vocabulary, and it's worth saying:
-//! in this byte-level model the head is `dim x 256`, barely ~2.5% of the
-//! work per token, so the savings barely show. With a real 32k vocabulary,
-//! the head becomes `dim x 32000` and **dominates** the per-token cost.
-//! There, skipping it isn't a minor detail.
-//!
-//! THE WARNING THAT CAME MEASURED from the other end of the project: a
-//! **loose** constraint came out worse than none at all -- with loose
-//! grammar, 8 garbage citations showed up where there were zero without
-//! grammar. Half a constraint isn't half the protection: it's the
-//! protection turned off plus the illusion of having it. If a constraint
-//! can't say with certainty what's legal, it should return `Any`, not a
-//! half-built list.
+//! A WARNING THAT CAME MEASURED from the other end of the project: a LOOSE
+//! constraint came out worse than none -- with loose grammar, 8 garbage
+//! citations appeared where there were zero without grammar. Half a constraint
+//! is not half the protection: it is the protection off, plus the illusion of
+//! having it. A constraint that cannot say with certainty what is legal must
+//! return `Any`, not a half-built list.
 
 /// What the structure allows at this position.
 pub enum Allowed {

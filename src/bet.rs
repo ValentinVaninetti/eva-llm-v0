@@ -1,26 +1,17 @@
-//! 8. THAT IT BETS -- the first number that kills it.
+//! THAT IT BETS: does the confidence the model DECLARES track what it actually
+//! gets right, on text it did not see?
 //!
-//! > Does the confidence the model **declares** track what it actually gets
-//! > right, on text it **did not see**?
+//! Over the validation slice (the same contiguous cut as training), each token
+//! prediction records `conf` = p(token it would pick), how sure it said it was,
+//! and `correct` = whether that was the real one. Grouped by declared-
+//! confidence decile, accuracy should rise with it. If the correlation does not
+//! show up, the organizing principle dies right here.
 //!
-//! The model is run over the validation slice (the same contiguous cut
-//! `train` used) and, for each token prediction, we record:
+//! The failure mode to watch for -- learning to always bet low -- shows up in
+//! the margin: if (p1 - p2) does not separate the right answers from the wrong
+//! ones, the confidence is uniform cowardice and is not usable for betting.
 //!
-//! * `conf`    = p(token it would pick) -- how sure it *said* it was
-//! * `correct` = whether that token was the real one
-//!
-//! These are grouped by declared-confidence deciles and we check whether
-//! accuracy rises with it. **If the correlation doesn't show up, the
-//! organizing principle dies right here** and we save ourselves the other
-//! six.
-//!
-//! The failure mode to watch for -- learning to always bet low -- shows up
-//! in the margin: if the margin (p1 - p2) doesn't separate the ones it gets
-//! right from the ones it doesn't, the confidence is uniform cowardice and
-//! isn't usable for betting either.
-//!
-//! Nothing is tuned against this number: it's a measurement. Validation is
-//! touched exactly once.
+//! Nothing is tuned against this number, and validation is touched once.
 
 use crate::data::TextDataset;
 use crate::model::EvaModel;

@@ -1,29 +1,23 @@
-//! The kid doesn't learn from its
-//! mistakes WHILE IN USE. The table gets built once from train and after
-//! that it's read-only -- when the final system errs and the real answer
-//! arrives (here: the corpus's real byte, simulating streaming/
-//! transcription/correction), that error gets lost. "The kid improves
-//! while working."
+//! The kid does not learn from its mistakes WHILE IN USE.
 //!
-//! The teacher design, as specified:
-//! - Marks the EXACT PAIR (context -> real byte), not a concept.
-//! - Marks only where the FINAL system erred AND memory was ignorant
-//!   (miss, or a hit with high H(q)). If the table already knew, the hit
-//!   already corrects it -- marking there would be redundant.
-//! - Enters as a +1 count with the SAME discipline as `build`
-//!   (MIN_COUNT=2 in `find`), not as a "this is THE answer" flag. The
-//!   teacher who marks it, not the one who shouts.
+//! The table is built once from train and is read-only afterwards, so when the
+//! final system errs and the real answer arrives (here, the corpus's real byte,
+//! simulating streaming / transcription / correction) that error is lost.
 //!
-//! Only change to `src/`: `Recall::observe` (write path, already committed
-//! separately). The rest is re-aggregation: the same model forward
-//! (frozen, not trained here) for control and treatment, only the table
-//! differs.
+//! The teacher, as specified: it marks the EXACT PAIR (context -> real byte),
+//! not a concept; only where the FINAL system erred AND memory was ignorant (a
+//! miss, or a hit with high H(q)) -- if the table already knew, the hit
+//! corrects it and marking there is redundant; and it enters as a +1 count
+//! under the same discipline as `build` (MIN_COUNT=2 in `find`), not as a
+//! "this is THE answer" flag. The teacher who marks, not the one who shouts.
 //!
-//! Control: same second half of the stream, memory ALWAYS frozen (`observe`
-//! never called). The number that decides: treatment second half vs
-//! control second half -- not "first vs second half within treatment",
-//! which would be confounded with the text getting easier later for
-//! reasons that have nothing to do with learning.
+//! Only `src/` change: `Recall::observe`, committed separately. The rest is
+//! re-aggregation over the same frozen forward; only the table differs.
+//!
+//! The number that decides: treatment second half vs CONTROL second half, where
+//! the control is the same stream with memory always frozen. Not "first vs
+//! second half within treatment", which confounds learning with the text simply
+//! getting easier later.
 
 use eva_llm_v0::data::TextDataset;
 use eva_llm_v0::recall::Recall;

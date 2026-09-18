@@ -1,63 +1,21 @@
-//! Entity retrieval benchmark on real text (2026-08-15).
+//! Entity retrieval benchmark on real text.
 //!
-//! The Quijote T=1 vs T=1.3 result (1.716 vs 1.720 global bpb) cannot separate
+//! Global bpb (1.716 vs 1.720 for T=1 vs T=1.3 on the Quijote) cannot separate
 //! "does the long-range memory help?" from "does a 13M model learn language?".
-//! This benchmark is the directed alternative we proposed: it plants a
-//! controlled but semantically natural signal -- proper names/entities that
-//! reappear -- and measures whether the model assigns higher probability to an
-//! entity's bytes when it has already seen that entity, as a function of the
-//! distance (in bytes) back to the previous occurrence.
-//!
-//! Metric per (entity, distance bucket), measured at the entity's FIRST byte:
-//!   n        : occurrences measured
-//!   top1/top5: % where the correct next byte is in the model's top-k
-//!   mean_lnp : mean SURPRISAL (nats) of the correct byte -- this is
-//!              `-log p`, computed below as
-//!              `-((row[first_byte] - m) - ln(esum))`. **LOWER IS BETTER.**
-//!              The name is a historical misnomer kept for log compatibility:
-//!              it is a negative log-probability, not a log-probability.
-//!   Δlnp     : mean_lnp of this bucket minus the same entity's reference
-//!              (nowin in no-carry mode, cold in carry mode).
-//!              **NEGATIVE = the prior occurrence in memory HELPED** (less
-//!              surprised than with no memory available) -> retrieval signal.
-//!              Positive = worse than having no memory at all.
-//!
-//!              SIGN CORRECTION (2026-08-25): this header previously said
-//!              "Positive = ... helped", which is backwards for a surprisal.
-//!              PAPER-DRAFT.md 4.8 inherited that error and reported the
-//!              real-text retrieval result with its conclusion inverted. The
-//!              sign is settled by two quantities in the same table that do
-//!              not depend on it: at 32<d<=128 the model scores top1 50.00%
-//!              and rank 6.9 against a no-memory reference of 34.94% / 9.8,
-//!              i.e. it is BETTER there -- and that is the bucket whose Δlnp
-//!              is -0.829. Negative Δlnp means better.
-//!   rank     : mean rank of the correct byte
-//!   name_bpb : per-byte bpb over the whole entity (secondary; mixes short
-//!              range once the first byte is right)
-//!
-//! References:
-//!   nowin (no-carry only): a prior occurrence exists but OUTSIDE the current
-//!     window, so the model cannot see it -- the honest ">512 with no memory"
-//!     baseline for the architecture AS TRAINED (windows are independent).
-//!   cold : the first occurrence of the entity in the whole corpus -- pure
-//!     no-memory baseline for that entity (small n by construction).
-//!
-//! Modes:
-//!   default          : windows independent, exactly like training (distances
-//!                      capped by seq; >512 falls into `nowin`).
-//!   EVA_ENTITY_CARRY=1: ClockMem state carried across windows
-//!                      (`EvaModel::forward_carrying`), so distances can reach
-//!                      512/1024+. NOTE: the model was trained with
-//!                      independent windows; carried state is out of
-//!                      distribution, so carry-mode numbers are exploratory.
+//! This plants a controlled but natural signal -- proper names that reappear --
+//! and asks whether the model gives an entity's bytes higher probability once
+//! it has already seen that entity, as a function of how far back the previous
+//! occurrence was.
 //!
 //! USAGE: cargo run --release --example entity_retrieval -- <weights> <data>
-//!   Set EVA_ALPHA_TEMP to match the checkpoint (1.0 for *_T1, 1.3 for *_T13).
-//!   env: EVA_ENTITY_CARRY=1, EVA_ENTITY_MIN=n (default 30),
-//!       EVA_ENTITY_N=n (default 12, reported individually),
-//!       EVA_ENTITY_TRAIN=1 (also evaluate the train region).
-//!   The headline is VALIDATION (last 10% contiguous windows, same cut as
-//!   mask_eval and train).
+//!   EVA_ALPHA_TEMP must match the checkpoint (1.0 for *_T1, 1.3 for *_T13).
+//!   EVA_ENTITY_CARRY=1 carries ClockMem state across windows, so distances can
+//!     exceed the window. The model was trained on independent windows, so
+//!     carry-mode numbers are out of distribution and exploratory.
+//!   EVA_ENTITY_MIN=n (default 30), EVA_ENTITY_N=n (default 12),
+//!     EVA_ENTITY_TRAIN=1 also evaluates the train region.
+//!   The headline is VALIDATION: last 10% contiguous windows, the same cut as
+//!   `mask_eval` and training.
 
 use eva_llm_v0::data::TextDataset;
 use eva_llm_v0::model::EvaModel;
@@ -112,6 +70,27 @@ fn find_occurrences(ids: &[usize], pat: &[u8]) -> Vec<usize> {
 }
 
 #[derive(Default, Clone)]
+/// One row of the report, per (entity, distance bucket), measured at the
+/// entity's FIRST byte:
+///   n        occurrences measured
+///   top1/top5 % where the correct next byte is in the model's top-k
+///   mean_lnp mean SURPRISAL in nats: `-log p` of the correct byte.
+///            **LOWER IS BETTER.** The name is a historical misnomer kept for
+///            log compatibility; it is a negative log-probability.
+///   Δlnp     this bucket's mean_lnp minus the same entity's reference.
+///            **NEGATIVE = the prior occurrence in memory HELPED.**
+///            Positive = worse than having no memory at all.
+///   rank     mean rank of the correct byte
+///   name_bpb bpb over the whole entity (secondary: once the first byte is
+///            right it mixes in short-range structure)
+///
+/// SIGN CORRECTION (2026-08-25): this doc previously said "Positive = helped",
+/// which is backwards for a surprisal, and PAPER-DRAFT.md 4.8 inherited the
+/// error and reported the real-text result with its conclusion inverted. Two
+/// quantities in the same table settle the sign without depending on it: at
+/// 32<d<=128 the model scores top1 50.00% and rank 6.9 against a no-memory
+/// reference of 34.94% / 9.8 -- better there -- and that is the bucket whose
+/// Δlnp is -0.829. Negative Δlnp means better.
 struct Stats {
     n: usize,
     ok1: usize,
@@ -149,6 +128,12 @@ impl Stats {
     }
 }
 
+/// The two references a bucket's Δlnp can be measured against:
+///   nowin (no-carry only) a prior occurrence exists but OUTSIDE the current
+///     window, so the model cannot see it -- the honest ">512 with no memory"
+///     baseline for the architecture AS TRAINED (windows are independent).
+///   cold  the entity's first occurrence in the whole corpus: a pure no-memory
+///     baseline for that entity, with small n by construction.
 struct BucketInfo {
     label: &'static str,
     /// reference used for the Δlnp column: None => no reference column.

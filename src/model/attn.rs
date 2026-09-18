@@ -1,26 +1,23 @@
-//! Single-head causal attention. **Exists to have something to measure
-//! against.**
+//! Single-head causal attention. Exists to have something to measure against.
 //!
-//! It isn't the direction of the project: it's the reference baseline. Until
-//! this existed, the only evidence that EvaClock worked was that it
-//! memorized a 55 KB corpus, which anything with enough parameters can do.
+//! Not the direction of the project: the reference baseline. Until it existed,
+//! the only evidence EvaClock worked was that it memorized a 55 KB corpus,
+//! which anything with enough parameters can do.
 //!
-//! THE COMPARISON IS FAIR BY CONSTRUCTION, which is the whole point: ClockMem
-//! has `wq, wk, wv, wg` and this has `wq, wk, wv, wo` -- four DxD matrices in
-//! both cases, **exactly the same number of parameters**. It plugs into the
-//! same block, with the same conv, the same FFN, the same norms and the same
-//! optimizer. The only thing that changes is the temporal mixer.
+//! THE COMPARISON IS FAIR BY CONSTRUCTION, which is the whole point. ClockMem
+//! has `wq, wk, wv, wg` and this has `wq, wk, wv, wo`: four DxD matrices each,
+//! exactly the same parameter count. Same block, same conv, same FFN, same
+//! norms, same optimiser. Only the temporal mixer changes.
 //!
-//! A single head on purpose, not out of laziness: ClockMem doesn't have heads
-//! either. Splitting this into heads while leaving the other alone wouldn't
-//! compare the two mechanisms, it would compare one of them against itself
-//! with more machinery around it.
+//! A single head on purpose: ClockMem has no heads either. Splitting this into
+//! heads while leaving the other alone would not compare the two mechanisms, it
+//! would compare one against itself with more machinery around it.
 //!
-//! The difference we actually want to see is structural: here the state is
-//! an SxS matrix that gets built in full (O(S^2) in compute and memory) and
-//! can do associative retrieval --key A looks up value B--; ClockMem carries
-//! a D-sized vector (O(S*D), O(D) at inference) and can't. The question is
-//! how much that difference is worth in actual loss, not in principle.
+//! The difference worth seeing is structural: here the state is an SxS matrix
+//! built in full (O(S^2) compute and memory) that can do associative retrieval
+//! -- key A looks up value B -- while ClockMem carries a D-sized vector
+//! (O(S*D), O(D) at inference) and cannot. The question is what that is worth
+//! in actual loss, not in principle.
 
 use crate::nn::{Linear, Module};
 use crate::rng::Rng;

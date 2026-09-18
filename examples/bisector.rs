@@ -1,26 +1,22 @@
-//! Does halving bisection locate the
-//! first error within a bad span, or is there something better with what
-//! we already have?
+//! Does halving bisection locate the first error inside a bad span, or is there
+//! something better with what we already have?
 //!
 //! ZERO new forward passes: re-aggregates the trace `bet::scan` already
 //! returns. For each span (length 16) with `good < 0.5` over validation,
-//! defines first_error = the first position with `correct == false`, and
-//! compares three ways of estimating it:
+//! first_error is the first position with `correct == false`, and three
+//! estimators are compared:
 //!
-//! (a) whole-span bar -- doesn't localize anything, you'd have to redo the
-//!     whole span. This is the "no localization" reference.
-//! (b) bisection: splits the span in half, keeps the half with lower mean
-//!     confidence, recurses down to a single token. This is the
-//!     BitVMX-by-halves candidate as originally proposed.
-//! (c) per-token change-point: the token with the lowest declared
-//!     confidence (`conf`) within the span -- doesn't bisect anything,
-//!     looks at the whole trace.
+//!   (a) whole-span bar -- localises nothing, the whole span is redone. The
+//!       "no localisation" reference.
+//!   (b) bisection -- split the span, keep the half with lower mean confidence,
+//!       recurse to a single token. The BitVMX-by-halves candidate.
+//!   (c) per-token change-point -- the lowest-confidence token in the span;
+//!       bisects nothing, looks at the whole trace.
 //!
-//! Metrics: pooled AUROC ("is this token the first error?", over all bad
-//! spans together), mean distance |predicted - real|, and the payoff --
-//! if only the span from the predicted point to the end gets redone, how
-//! much of the span is saved and what fraction of the time the predicted
-//! point falls BEFORE or AT the real error (so the redo covers it).
+//! Metrics: pooled AUROC ("is this token the first error?" across all bad
+//! spans), mean |predicted - real|, and the payoff -- redoing only from the
+//! predicted point onward, how much of the span is saved and how often that
+//! point falls at or before the real error, so the redo actually covers it.
 
 use eva_llm_v0::bet::{scan, TokenObs};
 use eva_llm_v0::data::TextDataset;

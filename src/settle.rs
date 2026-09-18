@@ -1,37 +1,29 @@
-//! Point 9: what fraction of the parameters stop moving, and when?
+//! What fraction of the parameters stop moving, and when?
 //!
-//! Before writing the freezing mechanism we need to know if there's
-//! anything to freeze. The question isn't "does the gradient ever come out
-//! small?" -- that happens all the time and means nothing. The question is:
-//! **does a parameter stay still for SEVERAL consecutive windows of real
-//! training, and does that count grow as the model learns?** If the answer
-//! is no, there's nothing to freeze and point 9 closes right here, the same
-//! way the cheap version of 8 closed.
+//! Before writing a freezing mechanism, find out whether there is anything to
+//! freeze. Not "does the gradient ever come out small?" -- that happens all the
+//! time and means nothing -- but: does a parameter stay still for SEVERAL
+//! consecutive windows of real training, and does that count grow as the model
+//! learns? If not, there is nothing to freeze and the line closes here.
 //!
-//! HOW IT'S MEASURED: training is split into windows of `every` steps. At
-//! the start and end of each window a snapshot of ALL parameters is taken
-//! (a clone of the buffer, not of the graph -- this doesn't touch
-//! `optim.rs` or `autograd.rs`, so it does not collide with work in
-//! progress elsewhere). For each parameter we compute how much it moved,
-//! relative to its own size:
+//! Training is split into windows of `every` steps. All parameters are
+//! snapshotted at each window's start and end (a clone of the buffer, not the
+//! graph, so it touches neither `optim.rs` nor `autograd.rs`), and movement is
+//! measured relative to the parameter's own size:
 //!
 //! ```text
 //! ratio = |end - start| / (|start| + 1e-6)
 //! ```
 //!
-//! A parameter is "still in this window" if `ratio` didn't reach the
-//! threshold. A parameter is "settled" if it's been still for `streak`
-//! CONSECUTIVE windows -- if it moves for even a single window, the streak
-//! breaks. This is intentional: it's the same question the
-//! unfreezing mechanism would ask ("if it fails, it softens"), just on the
-//! freezing side. It's not sticky.
+//! Still in this window = `ratio` below threshold. Settled = still for `streak`
+//! CONSECUTIVE windows; a single moving window breaks the streak. Deliberately
+//! not sticky: it is the same question the unfreezing side would ask.
 //!
-//! THE THRESHOLD IS A CHOICE, so we don't report just one: three are run
-//! (relaxed, medium, strict) over the SAME run, because the snapshots are
-//! already taken and recomputing costs nothing. If all three count a
-//! similar and growing fraction, the number is real. If only the relaxed
-//! one sees anything, the result is an artifact of the threshold, not a
-//! finding.
+//! THE THRESHOLD IS A CHOICE, so three are reported (relaxed, medium, strict)
+//! over the same run -- the snapshots exist already and recomputing is free. A
+//! similar, growing fraction under all three means the number is real. If only
+//! the relaxed one sees anything, it is an artifact of the threshold.
+
 
 use crate::data::TextDataset;
 use crate::model::{EvaConfig, EvaModel};

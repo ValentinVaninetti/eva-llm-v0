@@ -1,45 +1,34 @@
-//! Generator for the ASSOCIATIVE RECALL benchmark (2026-08-16),
-//! proposed after the entity-retrieval result on the Quijote showed that
-//! neither T=1, T=1.3, nor a fixed-slow-decay SSM ever beat the no-memory
-//! reference at long range (see PAPER-DRAFT.md 4.7-4.9).
+//! Generator for the ASSOCIATIVE RECALL benchmark, written after
+//! entity-retrieval on the Quijote showed that neither T=1, T=1.3 nor a
+//! fixed-slow-decay SSM ever beat the no-memory reference at long range
+//! (PAPER-DRAFT.md 4.7-4.9).
 //!
-//! The earlier synthetic benchmark (`generate_synthetic.rs`) tests
-//! POSITIONAL recall: y[t] = F(x[t-N]), a FIXED, globally-shared lag N and
-//! a FIXED, globally-shared permutation F. The model never has to search
-//! for anything -- it always knows exactly how far back to look, and F is
-//! learnable once as a static weight (memorized across the whole training
-//! set, not re-derived per sequence). That is a much easier task than what
-//! real entity recall in text actually needs: the same name can reappear
-//! at any distance, and its associated "value" (what it means, what it's
-//! bound to) has to be learned FRESH, from context, every time -- content
-//! addressing, not position addressing.
+//! This is CONTENT addressing, not POSITION addressing. The earlier synthetic
+//! benchmark (`generate_synthetic.rs`) uses y[t] = F(x[t-N]) with a fixed,
+//! globally-shared lag and permutation: the model always knows how far back to
+//! look, and F is memorized once across the whole training set. Real recall
+//! needs the opposite -- the same name reappears at any distance and its
+//! binding has to be re-derived from context every time.
 //!
-//! This generator builds the standard associative-recall / induction-head
-//! task (the MQAR family: Olsson et al. 2022 induction heads; Fu et al.
-//! 2023 H3/Hyena; Arora et al. 2023 Based/MQAR) adapted to a byte-level LM:
+//! The standard associative-recall / induction-head task (MQAR family: Olsson
+//! et al. 2022; Fu et al. 2023 H3/Hyena; Arora et al. 2023 Based/MQAR) adapted
+//! to a byte-level LM:
 //!
-//!   KEY  in [0, 32)     -- 32 possible key symbols
-//!   VALUE in [32, 64)   -- 32 possible value symbols
-//!   FILLER in [64, 256) -- noise, spaces out events at RANDOM gaps
+//!   KEY    [0, 32)     VALUE  [32, 64)     FILLER [64, 256), random gaps
 //!
-//! Per window (self-contained, fresh bindings every window -- NOT a global
-//! fixed table like the old benchmark's F): repeatedly emit a (KEY, VALUE)
-//! pair chosen from `active_keys` keys, followed by a random-length filler
-//! run. The FIRST time a key appears in a window, its value is random and
-//! UNPREDICTABLE (a "binding", analogous to `cold` in entity_retrieval).
-//! Every later occurrence of that same key is a "query": the key alone is
-//! written, and the byte immediately after it (the normal next-byte
-//! prediction target) is the value bound earlier -- predictable ONLY if
-//! the model actually recalls that specific key's binding, at whatever
-//! (random, unknown-in-advance) distance it happened.
+//! Per window, bindings are FRESH (no global table): emit (KEY, VALUE) pairs
+//! drawn from `active_keys`, spaced by filler runs. A key's FIRST appearance
+//! binds a random, unpredictable value (analogous to `cold` in
+//! entity_retrieval). Every later occurrence is a query: the key alone is
+//! written, and the next byte is the value bound earlier -- predictable ONLY by
+//! recalling that key's binding, at a random distance not known in advance.
 //!
 //! USAGE: cargo run --release --example generate_associative -- <active_keys> <seq> <win> <seed> <out>
-//!   active_keys  distinct keys reused within each window (<=32; try 8)
-//!   seq          window length (512, matching the rest of this project's benchmarks)
+//!   active_keys  distinct keys reused per window (<=32; try 8)
+//!   seq          window length (512, as in the rest of the benchmarks)
 //!   win          number of windows
-//!   seed         data seed (bindings and fillers depend on this; the byte
-//!                ranges KEY/VALUE/FILLER are fixed constants, not derived
-//!                from a "physics" seed -- there is no global F to learn)
+//!   seed         data seed: bindings and fillers depend on it. The KEY/VALUE/
+//!                FILLER ranges are fixed constants -- there is no global F.
 //!   out          output file
 
 use eva_llm_v0::rng::Rng;

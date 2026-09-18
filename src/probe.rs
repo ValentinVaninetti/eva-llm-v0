@@ -1,25 +1,24 @@
 //! Write-magnitude probe for the error-gated write (EVA_WRITE_ERROR).
 //!
-//! Measures, over a slice of the corpus, whether the model's own internal
-//! error signal already separates positions where the token is NEW from
-//! positions where it REPEATS something already in the window, and what the
-//! gate would do to the write magnitude in each class.
+//! Over a slice of the corpus: does the model's own internal error signal
+//! already separate positions where the token is NEW from positions where it
+//! REPEATS something already in the window, and what would the gate do to the
+//! write magnitude in each class?
 //!
-//! The gate lives inside the normal forward (`ops::clockmem_gated_from`).
-//! With `EVA_WRITE_ERROR=1 EVA_WRITE_ERROR_TRACE=1` that forward records,
-//! per ClockMem block and per position, the pair (e_t, r_t). This command
-//! sets those variables itself so the measurement is deterministic and
-//! always measures the gate ON (it reads `EVA_WRITE_ERROR_P` if you set it,
-//! default 1.0).
+//! The gate lives in the normal forward (`ops::clockmem_gated_from`); with
+//! `EVA_WRITE_ERROR=1 EVA_WRITE_ERROR_TRACE=1` that forward records (e_t, r_t)
+//! per ClockMem block and position. This command sets those variables itself,
+//! so the measurement is deterministic and always has the gate ON (it honours
+//! `EVA_WRITE_ERROR_P`, default 1.0).
 //!
-//! The gate-OFF baseline needs no forward pass: with the plain recurrence
-//! the write magnitude is the block's `beta` at every position, identical
-//! for both classes by construction. The separation the gate could add --
-//! "if it is new, write more" -- is exactly the `r` column of this probe.
+//! The gate-OFF baseline needs no forward pass: under the plain recurrence the
+//! write magnitude is the block's `beta` everywhere, identical for both classes
+//! by construction. What the gate could add -- "if it is new, write more" -- is
+//! exactly the `r` column here.
 //!
-//! "Novelty" is defined per window: position t is NEW if input[t] has not
-//! appeared at any earlier position of the same window, REPEATED otherwise.
-//! A position is classified by its token, not by the model's output.
+//! NOVELTY is per window: position t is NEW if input[t] has not appeared
+//! earlier in the same window, REPEATED otherwise. Classified by the token, not
+//! by the model's output.
 
 use crate::data::TextDataset;
 use crate::model::block::Mixer;

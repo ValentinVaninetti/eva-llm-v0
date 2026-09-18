@@ -1,27 +1,23 @@
-//! Per-position adaptive lambda (using the FREE
-//! signal of p[argmax], Step 1's result) against a fixed global lambda,
-//! kNN-LM style -- both in the SAME log-linear form, to isolate a single
-//! variable (adaptive vs fixed) and not mix it up with "log-linear vs
-//! probability space".
+//! Per-position adaptive lambda (from the FREE signal p[argmax]) against a
+//! fixed global lambda, kNN-LM style.
 //!
-//! FORMULA USED (spelled out explicitly, so it can be corrected if this
-//! isn't the exact intent -- the message reuses "beta" in two formulas
-//! and a literal reading would square it in the adaptive case, which is
-//! almost certainly not the intent):
+//! Both are put in the SAME log-linear form, to isolate one variable (adaptive
+//! vs fixed) rather than confounding it with "log-linear vs probability space".
 //!
-//!   bias_i_k = max(ln(q_i_k + eps), -7.7)      -- Seneca's cap, no beta inside
-//!   FIXED:      z_i = z_m,i + beta * bias_i
-//!   ADAPTIVE:   z_i = z_m,i + beta * gate_i * bias_i
-//!   gate_i = 0                       if p[argmax]_i >= 0.8 (floor)
-//!          = clamp(1 - p[argmax]_i, 0, 1)   otherwise
+//!   bias_i_k = max(ln(q_i_k + eps), -7.7)       the cap, no beta inside
+//!   FIXED:     z_i = z_m,i + beta * bias_i
+//!   ADAPTIVE:  z_i = z_m,i + beta * gate_i * bias_i
+//!   gate_i   = 0 if p[argmax]_i >= 0.8, else clamp(1 - p[argmax]_i, 0, 1)
 //!
-//! A single beta, swept over DEVELOPMENT (the half of the windows already
-//! used to train the probe in `table_probe.rs`), chosen separately for
-//! fixed and adaptive -- never looking at the VALIDATION half, which is
-//! touched exactly once for the final number.
+//! The formula is spelled out because the original specification reused "beta"
+//! in two places, and a literal reading would square it in the adaptive case.
 //!
-//! Does NOT touch `src/`: only `forward_hidden`, `Recall::lookup_detail`,
-//! `bet::classify_row`, all public. Zero new op, exactly as we asked.
+//! A single beta, swept over DEVELOPMENT (the window half already used to train
+//! the probe in `table_probe.rs`) and chosen separately for fixed and adaptive.
+//! The VALIDATION half is touched exactly once, for the final number.
+//!
+//! Touches no `src/`: `forward_hidden`, `Recall::lookup_detail` and
+//! `bet::classify_row` are public. Zero new ops.
 
 use eva_llm_v0::bet::classify_row;
 use eva_llm_v0::data::TextDataset;

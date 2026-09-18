@@ -1,28 +1,24 @@
 //! Local credit: no gradient crosses from one block to another.
 //!
-//! THE BET. To backpropagate you have to hold the activations of the whole
-//! pass: training memory scales with **depth x width x length**, and that's
-//! what forces buying expensive hardware. It's not the compute, it's the
-//! memory.
+//! THE BET. Backpropagation has to hold the activations of the whole pass, so
+//! training memory scales with depth x width x length -- that is what forces
+//! expensive hardware. It is not the compute, it is the memory. If each block
+//! has its own objective and gradient does not cross, training an N-block
+//! network needs the memory of one. No kernel optimisation does that.
 //!
-//! If each block has its own objective and gradient doesn't cross, training
-//! an N-block network needs the memory of **one**. No kernel optimization
-//! does that.
+//! HOW IT IS CHARGED, the part that is easy to get wrong: disconnecting the
+//! inputs is not enough. If every block's losses are summed and ONE backward
+//! runs at the end, the graph is still whole and nothing was saved. The benefit
+//! exists only if each block backpropagates, updates and FREES before the next
+//! starts. That is why the loop below is shaped the way it is.
 //!
-//! HOW IT'S CHARGED, which is the part that's easy to get wrong: it's not
-//! enough to disconnect the inputs. If every block's losses get summed and
-//! ONE backward runs at the end, the graph is still whole and nothing was
-//! saved. The benefit only exists if each block **backpropagates, updates,
-//! and frees** before the next one starts. That's why the loop below is
-//! shaped the way it is.
-//!
-//! THE REASON TO DOUBT IT, and it's a strong one: **local rules do worse
-//! than backprop in every serious published attempt.** This isn't proposed
-//! because it's expected to win. It's proposed because it's always been
-//! tested on architectures designed *for* backprop, never on a recurrent
-//! model with per-channel decay where temporal credit is already analytic
-//! and local; and because if it ties, the savings are structural. It gets
-//! measured against the baseline and the verdict is accepted.
+//! THE REASON TO DOUBT IT, and it is strong: local rules do worse than backprop
+//! in every serious published attempt. This is not proposed because it is
+//! expected to win, but because it has always been tested on architectures
+//! designed *for* backprop, never on a recurrent model with per-channel decay
+//! where temporal credit is already analytic and local -- and because if it
+//! ties, the saving is structural. Measured against the baseline, verdict
+//! accepted either way.
 
 use crate::nn::{param, Module, RMSNorm};
 use crate::rng::Rng;

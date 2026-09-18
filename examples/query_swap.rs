@@ -1,46 +1,36 @@
 //! QUERY-SWAP: does the model actually USE the identity of the key it is
-//! being queried with? (the diagnostic, 2026-08-18.)
+//! being queried with?
 //!
-//! WHY THIS EXISTS. The bucket evaluator says every model identifies the
-//! right candidate SET (92-99.9% of top-1 predictions are a value bound
-//! somewhere in that window) and then mostly guesses within it. Two very
-//! different mechanisms produce that signature:
+//! Every model identifies the right candidate SET (92-99.9% of top-1
+//! predictions are a value bound somewhere in the window) and then mostly
+//! guesses within it. Top-1 cannot separate (a) it reads the query key but
+//! retrieval is noisy, from (b) it IGNORES the key and emits "some value in
+//! play here", which already earns partial credit. This can, with no training:
+//! take a real query position `t` asking key A, and re-run the SAME window with
+//! byte `t` replaced by another already-bound key B. Everything before `t` is
+//! bit-identical, so the only change is which key is asked.
 //!
-//!   (a) the model reads the query key, but its retrieval is noisy;
-//!   (b) the model IGNORES the query key and emits "some value that is in
-//!       play here", which already earns partial credit.
+//!   binds       -> P(val_A) collapses and P(val_B) rises
+//!   ignores key -> both distributions stay nearly the same
 //!
-//! Top-1 accuracy cannot separate them. This can, without training
-//! anything: take a real query position `t` where key A is being asked
-//! (A was bound to val_A earlier in the window), and re-run the SAME window
-//! with byte `t` replaced by another already-bound key B. Everything before
-//! `t` is bit-identical, so the only thing that changed is which key is
-//! being asked.
+//! READ THE DIRECTIONAL NUMBER, NOT THE RATIO (learned the hard way). The
+//! total-variation ratio answers "did the output MOVE", not "did it move toward
+//! the right answer" -- swapping A for B replaces a byte with another of the
+//! same family, which perturbs the distribution carrying no identity
+//! information at all. Measured: a checkpoint showed ratio 1.45x (reproducible
+//! at 3x the sample, so not noise) while `P(val_A | ask A) - P(val_A | ask B)`
+//! was +0.0005. It moved 45% more than for a filler byte and pointed nowhere.
+//! The signed probability difference is the one that tells binding from motion.
 //!
-//!   binds        -> P(val_A) collapses and P(val_B) rises
-//!   ignores key  -> both distributions stay nearly the same
-//!
-//! READ THE DIRECTIONAL NUMBER, NOT THE RATIO (learned the hard way,
-//! 2026-08-19). The total-variation ratio below answers "did the output
-//! MOVE", not "did it move toward the right answer". Swapping key A for key
-//! B replaces a byte with another byte of the same family, which perturbs
-//! the distribution for reasons that carry no identity information at all.
-//! A measured case: a checkpoint showed ratio 1.45x (reproducible at 3x the
-//! sample, so not noise) while `P(val_A | ask A) - P(val_A | ask B)` was
-//! +0.0005 — the output moved 45% more than for a filler byte and pointed
-//! nowhere. The probability difference is the one that can tell binding
-//! from motion, because it is signed and aimed at a specific answer. The
-//! ratio is useful only as scale for it, never on its own.
-//!
-//! CONTROL (not in the original proposal, but the numbers are unreadable
-//! without it): the same measurement perturbing a FILLER byte just before
-//! `t` instead of the key. Filler is noise the model should be free to
-//! ignore, so it calibrates "how much does this model's output move when
-//! you change an irrelevant byte". If swapping the KEY moves the output no
-//! more than swapping a filler byte, the key identity is being ignored --
-//! and that statement no longer depends on what counts as a "big" change.
+//! The CONTROL makes those numbers readable at all: the same measurement
+//! perturbing a FILLER byte just before `t`. Filler is noise the model should
+//! be free to ignore, so it calibrates how much this model's output moves when
+//! an irrelevant byte changes. If swapping the KEY moves it no more than
+//! swapping filler, key identity is being ignored -- and that no longer depends
+//! on what counts as a "big" change.
 //!
 //! USAGE: cargo run --release --example query_swap -- <weights> <data> [windows] [swaps_per_window]
+
 
 use eva_llm_v0::data::TextDataset;
 use eva_llm_v0::model::EvaModel;

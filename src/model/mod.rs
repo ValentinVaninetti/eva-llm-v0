@@ -20,7 +20,7 @@ pub enum Arch {
 }
 
 impl Arch {
-    pub fn from_str(s: &str) -> Result<Arch, String> {
+    pub fn parse(s: &str) -> Result<Arch, String> {
         match s {
             "clock" => Ok(Arch::Clock),
             "attn" | "attention" | "transformer" => Ok(Arch::Attn),

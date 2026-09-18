@@ -126,7 +126,7 @@ mod tests {
         let grads = crate::tensor::autograd::backward(&ops::sum_all(&l));
 
         assert!(
-            grads.get(&upstream.id).is_none(),
+            !grads.contains_key(&upstream.id),
             "the gradient crossed the cut: the credit isn't local"
         );
     }

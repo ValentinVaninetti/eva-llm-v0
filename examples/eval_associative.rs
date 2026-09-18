@@ -108,13 +108,13 @@ fn report(label: &str, model: &EvaModel, ds: &TextDataset, from: usize, to: usiz
             let row = &logits.data[t * v..(t + 1) * v];
             let m = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
             let esum: f64 = row.iter().map(|&x| ((x - m) as f64).exp()).sum();
-            let label = target[t] as usize;
+            let label = target[t];
             let nat = -((row[label] - m) as f64 - esum.ln());
             let mut best = 0usize;
             for j in 1..v { if row[j] > row[best] { best = j; } }
             let ok = best == label;
 
-            if b >= KEY_LO && b < KEY_HI {
+            if (KEY_LO..KEY_HI).contains(&b) {
                 let key = b as usize;
                 if !bound_seen[key] {
                     bound_seen[key] = true;

@@ -21,7 +21,6 @@
 
 use eva_llm_v0::data::TextDataset;
 use eva_llm_v0::model::block::Mixer;
-use eva_llm_v0::model::EvaModel;
 use eva_llm_v0::nn::Module;
 use eva_llm_v0::save::load_model;
 use eva_llm_v0::tensor::ops as ops;

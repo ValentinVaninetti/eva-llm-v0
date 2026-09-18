@@ -151,18 +151,18 @@ fn loss_of(a: &Tensor, w: &Tensor, targets: &[usize]) -> f32 {
 fn gradcheck_add_mul_broadcast() {
     let mut a = param(vec![0.5, -1.3, 0.7, 0.2, 0.9, -0.4], vec![2, 3]);
     let mut b = param(vec![0.3, 0.8, -0.2], vec![3]);
-    gradcheck_binary("add", &mut a, &mut b, |x, y| ops::add(x, y));
-    gradcheck_binary("mul", &mut a, &mut b, |x, y| ops::mul(x, y));
+    gradcheck_binary("add", &mut a, &mut b, ops::add);
+    gradcheck_binary("mul", &mut a, &mut b, ops::mul);
 }
 
 #[test]
 fn gradcheck_scale_silu_sigmoid_sum() {
     let mut x = param(vec![0.5, -1.3, 0.7, 0.2, 0.9, -0.4], vec![2, 3]);
     gradcheck_unary("scale", &mut x, |t| ops::scale(t, 2.5));
-    gradcheck_unary("silu", &mut x, |t| ops::silu(t));
-    gradcheck_unary("sigmoid", &mut x, |t| ops::sigmoid(t));
-    gradcheck_unary("algebraic_sigmoid", &mut x, |t| ops::algebraic_sigmoid(t));
-    gradcheck_unary("sum_all", &mut x, |t| ops::sum_all(t));
+    gradcheck_unary("silu", &mut x, ops::silu);
+    gradcheck_unary("sigmoid", &mut x, ops::sigmoid);
+    gradcheck_unary("algebraic_sigmoid", &mut x, ops::algebraic_sigmoid);
+    gradcheck_unary("sum_all", &mut x, ops::sum_all);
 }
 
 #[test]
@@ -270,9 +270,9 @@ fn gradcheck_clockmem_with_carried_state() {
     // without saying why.
     let (s, d) = (5, 3);
     let mut q = param((0..s * d).map(|i| (i as f32 - 7.0) / 10.0).collect(), vec![s, d]);
-    let mut k = param((0..s * d).map(|i| (i as f32 * 1.7 - 4.0) / 11.0).collect(), vec![s, d]);
-    let mut v = param((0..s * d).map(|i| (i as f32 * -0.9 + 2.0) / 8.0).collect(), vec![s, d]);
-    let mut g = param((0..s * d).map(|i| ((i % 3) as f32 - 1.0) / 4.0).collect(), vec![s, d]);
+    let k = param((0..s * d).map(|i| (i as f32 * 1.7 - 4.0) / 11.0).collect(), vec![s, d]);
+    let v = param((0..s * d).map(|i| (i as f32 * -0.9 + 2.0) / 8.0).collect(), vec![s, d]);
+    let g = param((0..s * d).map(|i| ((i % 3) as f32 - 1.0) / 4.0).collect(), vec![s, d]);
     let mut alpha = param(vec![0.35, 0.6, 0.15], vec![d]);
     let mut beta = param(vec![0.9], vec![1]);
     // An initial state clearly nonzero: if the backward ignored it, the
@@ -425,9 +425,9 @@ fn gradcheck_clockmem_readwin() {
     let (s, d, kwin) = (5, 3, 3);
     let mk = |a: f32, b: f32| param((0..s * d).map(|j| ((j as f32) * a + b) / 7.0).collect(), vec![s, d]);
     let mut q = mk(1.3, -2.0);
-    let mut k = mk(0.6, 1.0);
-    let mut v = mk(-0.8, 0.5);
-    let mut g = param((0..s * d).map(|j| ((j % 3) as f32 - 1.0) / 4.0).collect(), vec![s, d]);
+    let k = mk(0.6, 1.0);
+    let v = mk(-0.8, 0.5);
+    let g = param((0..s * d).map(|j| ((j % 3) as f32 - 1.0) / 4.0).collect(), vec![s, d]);
     let mut alpha = param(vec![0.5, 0.3, 0.8], vec![d]);
     let mut beta = param(vec![0.7], vec![1]);
     let mut w = param(vec![1.0, 0.2, -0.4, 1.0, 0.1, 0.3, 1.0, -0.5, 0.6], vec![kwin, d]);
@@ -960,17 +960,18 @@ fn wread_init_delta_and_structured_finite_difference() {
     let beta0 = cm.beta.data[0];
     // Default squash (no temp, no antisat in this test): alpha = sigmoid(z).
     let alpha = ops::sigmoid(&cm.log_clock);
+    let tap = |j: usize, c: usize| w.data[j * 8 + c];
     for c in 0..8 {
-        assert!((w.data[0 * 8 + c] - 1.0).abs() < 1e-6, "w[0,c] c={c}");
-        assert!((w.data[2 * 8 + c] - 1.0 / beta0).abs() < 1e-5, "w[N-1,c] c={c}: {}", w.data[2 * 8 + c]);
+        assert!((tap(0, c) - 1.0).abs() < 1e-6, "w[0,c] c={c}");
+        assert!((tap(2, c) - 1.0 / beta0).abs() < 1e-5, "w[N-1,c] c={c}: {}", tap(2, c));
         assert!(
-            (w.data[3 * 8 + c] + alpha.data[c] / beta0).abs() < 1e-5,
-            "w[N,c] c={c}: {} vs {}", w.data[3 * 8 + c], -alpha.data[c] / beta0
+            (tap(3, c) + alpha.data[c] / beta0).abs() < 1e-5,
+            "w[N,c] c={c}: {} vs {}", tap(3, c), -alpha.data[c] / beta0
         );
     }
     for j in [1usize, 4] {
         for c in 0..8 {
-            assert!(w.data[j * 8 + c].abs() < 1e-6, "tap {j} must be 0 (c={c})");
+            assert!(tap(j, c).abs() < 1e-6, "tap {j} must be 0 (c={c})");
         }
     }
 
@@ -1013,7 +1014,7 @@ fn ssm_fixed_alpha_excludes_clock_and_is_constant() {
 
     // forward_from must follow exactly the fixed-alpha recurrence.
     let x = Tensor::new((0..64).map(|i| (i as f32) / 64.0 - 0.5).collect(), vec![8, 8]);
-    let (_, fin) = cm.forward_from(&x, &vec![0.0; 8]);
+    let (_, fin) = cm.forward_from(&x, &[0.0; 8]);
     let beta_v = cm.beta.data[0];
     let k0 = cm.wk.forward(&x);
     let v0 = cm.wv.forward(&x);
@@ -1065,17 +1066,18 @@ fn oracle_readout_is_exact_and_has_no_learned_param() {
     assert_eq!(w.shape, vec![5, 8]);
     let beta0 = cm.beta.data[0];
     let alpha = ops::sigmoid(&cm.log_clock);
+    let tap = |j: usize, c: usize| w.data[j * 8 + c];
     for c in 0..8 {
-        assert!((w.data[0 * 8 + c] - 1.0).abs() < 1e-6, "oracle w[0,c] c={c}");
-        assert!((w.data[2 * 8 + c] - 1.0 / beta0).abs() < 1e-5, "oracle w[N-1,c] c={c}");
+        assert!((tap(0, c) - 1.0).abs() < 1e-6, "oracle w[0,c] c={c}");
+        assert!((tap(2, c) - 1.0 / beta0).abs() < 1e-5, "oracle w[N-1,c] c={c}");
         assert!(
-            (w.data[3 * 8 + c] + alpha.data[c] / beta0).abs() < 1e-5,
-            "oracle w[N,c] c={c}: {} vs {}", w.data[3 * 8 + c], -alpha.data[c] / beta0
+            (tap(3, c) + alpha.data[c] / beta0).abs() < 1e-5,
+            "oracle w[N,c] c={c}: {} vs {}", tap(3, c), -alpha.data[c] / beta0
         );
     }
     for j in [1usize, 4] {
         for c in 0..8 {
-            assert!(w.data[j * 8 + c].abs() < 1e-6, "oracle tap {j} must be 0 (c={c})");
+            assert!(tap(j, c).abs() < 1e-6, "oracle tap {j} must be 0 (c={c})");
         }
     }
     // Taps must track a learned alpha: rewrite log_clock and re-read.

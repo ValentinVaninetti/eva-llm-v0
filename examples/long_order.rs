@@ -24,9 +24,12 @@ fn pack(ctx: &[usize]) -> Vec<u8> {
     ctx.iter().map(|&b| b as u8).collect()
 }
 
-fn build_table(train: &[usize], orders: &[usize]) -> Vec<HashMap<Vec<u8>, Vec<(u8, u32)>>> {
+/// context bytes -> (next byte, count), one table per order.
+type Table = HashMap<Vec<u8>, Vec<(u8, u32)>>;
+
+fn build_table(train: &[usize], orders: &[usize]) -> Vec<Table> {
     orders.iter().map(|&k| {
-        let mut t: HashMap<Vec<u8>, Vec<(u8, u32)>> = HashMap::new();
+        let mut t: Table = HashMap::new();
         if train.len() > k {
             for i in 0..train.len() - k {
                 let key = pack(&train[i..i + k]);
@@ -46,7 +49,7 @@ fn build_table(train: &[usize], orders: &[usize]) -> Vec<HashMap<Vec<u8>, Vec<(u
 /// with enough occurrences. Also returns which order answered, for the
 /// coverage breakdown.
 fn lookup<'a>(
-    tables: &'a [HashMap<Vec<u8>, Vec<(u8, u32)>>],
+    tables: &'a [Table],
     orders: &[usize],
     ctx: &[usize],
 ) -> Option<(&'a Vec<(u8, u32)>, usize)> {
@@ -80,7 +83,7 @@ fn shannon_bits(q: &[f32]) -> f32 {
     nats / std::f32::consts::LN_2
 }
 
-fn evaluate(name: &str, orders: &[usize], tables: &[HashMap<Vec<u8>, Vec<(u8, u32)>>], ids: &[usize], queries: &[usize], vocab: usize) {
+fn evaluate(name: &str, orders: &[usize], tables: &[Table], ids: &[usize], queries: &[usize], vocab: usize) {
     let mut n_hit = 0usize;
     let mut n_correct = 0usize;
     let mut h_sum = 0.0f64;

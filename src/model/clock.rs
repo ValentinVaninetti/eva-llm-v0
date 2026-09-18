@@ -62,7 +62,7 @@ fn ssm_alpha() -> Option<f32> {
 /// disables the gate) and `EVA_WRITE_ERROR_TRACE=1` records `r_t` for the
 /// measurement. Returning `None` keeps the plain write.
 fn write_error_gate() -> Option<(f32, bool)> {
-    if !std::env::var("EVA_WRITE_ERROR").is_ok() {
+    if std::env::var("EVA_WRITE_ERROR").is_err() {
         return None;
     }
     let p = std::env::var("EVA_WRITE_ERROR_P")
@@ -125,6 +125,7 @@ fn no_gate() -> bool {
 ///     key and leaves the others almost intact
 ///   - distributed / hashed representation -> the drop is gradual and even,
 ///     with no magic group
+///
 /// Inference only: it does not affect training, and without the variable the
 /// behaviour is identical to always.
 fn read_mask() -> Option<Vec<usize>> {
@@ -326,9 +327,7 @@ impl ClockMem {
                 .map(|k| {
                     let mut data = vec![0.0f32; k * d];
                     if !r1_on {
-                        for c in 0..d {
-                            data[c] = 1.0;
-                        }
+                        data[..d].fill(1.0);
                     }
                     if let Some(n) = df_n {
                         let beta_v = beta.data[0];
@@ -451,9 +450,7 @@ impl ClockMem {
         let beta_v = self.beta.data[0];
         let alpha = alpha_squash(&Tensor::new(self.log_clock.data.to_vec(), vec![d]));
         let mut data = vec![0.0f32; k * d];
-        for c in 0..d {
-            data[c] = 1.0;
-        }
+        data[..d].fill(1.0);
         if n >= 1 && n - 1 < k {
             for c in 0..d {
                 data[(n - 1) * d + c] = 1.0 / beta_v;

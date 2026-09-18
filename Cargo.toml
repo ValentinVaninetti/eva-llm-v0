@@ -2,9 +2,30 @@
 name = "eva_llm_v0"
 version = "0.1.0"
 edition = "2021"
-description = "EVA v0 — LLM propio desde cero. Cero dependencias, sin CUDA, arquitectura experimental de memoria multi-escala."
+description = "A byte-level LLM written from scratch in Rust: zero dependencies, no CUDA, experimental multi-scale memory."
 
 [dependencies]
+
+# Three clippy lints are switched off for the whole package, on purpose and
+# with the reason stated, rather than sprinkling #[allow] over the code.
+#
+# needless_range_loop: in the tensor kernels the index walks SEVERAL arrays at
+#   once, at different offsets -- `cur[c]`, `aa.data[c]`, `kk.data[t*d + c]`.
+#   Rewriting one of them as an iterator leaves the rest indexed anyway, so it
+#   buys nothing and costs the symmetry that makes the maths readable. Cases
+#   where the index really did walk a single array were fixed, not silenced.
+# too_many_arguments: the forward/backward kernels take the tensors they
+#   operate on (q, k, v, g, alpha, beta, ...). Grouping them into a struct is
+#   a real refactor with real risk and no reader benefit yet; noted in
+#   ROADMAP.md rather than hidden.
+# large_enum_variant: `Mixer` holds ClockMem or Attention deliberately at the
+#   same level, since comparing them is the experiment. Boxing one side adds
+#   an indirection on the hot path, and this project does not optimise without
+#   measuring first.
+[lints.clippy]
+needless_range_loop = "allow"
+too_many_arguments = "allow"
+large_enum_variant = "allow"
 
 [profile.release]
 opt-level = 3

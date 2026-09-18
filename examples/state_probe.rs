@@ -165,15 +165,13 @@ fn main() {
         }
         // Store per-block z-scored features.
         let base = val_a.len() - (seq - n - 1);
-        let mut idx = 0usize;
-        for t in n..seq - 1 {
+        for (idx, t) in (n..seq - 1).enumerate() {
             for bi in 0..nb {
                 let a = feat_a(&curs, bi, t);
                 val_a[base + idx].0[bi] = (0..d).map(|c| a[c] / a_scl[bi][c]).collect();
                 let b = feat_b(&curs, &alphas, &betas, bi, t, n);
                 val_b[base + idx].0[bi] = (0..d).map(|c| b[c] / b_scl[bi][c]).collect();
             }
-            idx += 1;
         }
         if wi % 20 == 0 { eprintln!("  val: window {wi}/{n_win}"); }
     }
@@ -323,9 +321,10 @@ fn argmax(x: &[f64; 256]) -> usize {
     bi
 }
 
-/// Replicates the model's forward (same ops and order as src/model/block.rs
-/// + src/tensor/ops.rs::clockmem_from) while collecting each block's clock
-/// state per position. Fresh zero state per window. Returns [block][s][d].
+/// Replicates the model's forward -- same ops and same order as
+/// `src/model/block.rs` and `src/tensor/ops.rs::clockmem_from` -- while
+/// collecting each block's clock state per position. Fresh zero state per
+/// window. Returns [block][s][d].
 fn forward_clock(
     model: &EvaModel,
     input: &[usize],

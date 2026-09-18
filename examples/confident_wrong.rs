@@ -74,8 +74,8 @@ fn auroc(pairs: &[(f64, bool)]) -> f64 {
         let mut j = i;
         while j < v.len() && v[j].0 == v[i].0 { j += 1; }
         let mid_rank = (i + 1 + j) as f64 / 2.0;
-        for k in i..j {
-            if v[k].1 { pos_rank_sum += mid_rank; }
+        for e in &v[i..j] {
+            if e.1 { pos_rank_sum += mid_rank; }
         }
         i = j;
     }

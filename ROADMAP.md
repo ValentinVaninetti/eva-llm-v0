@@ -42,7 +42,16 @@ with staged stopping rules so the likely cost is one hour, not eight. A first
 stage only checks whether the new path is used at all — if `M` stays inert, the
 answer is "on real text the gradient does not use it" and that is publishable.
 
-**3. An external reference.** Everything so far compares ClockMem against
+**3. Group the kernel arguments.** The forward/backward kernels take up to
+twelve loose tensors (`clockmem_inject_learn_g`: q, k, v, g, alpha, beta,
+alpha_read, inv_beta, z, floor, n, s0). `clippy::too_many_arguments` is
+switched off for the package with the reason written in `Cargo.toml`, which is
+a declared debt, not a fix: the signatures are mechanical and easy to pass in
+the wrong order. Grouping them into a struct is safe to do only with a
+characterisation test over the whole forward, since the tests cover the lib but
+not the diagnostics in `examples/`.
+
+**4. An external reference.** Everything so far compares ClockMem against
 baselines built *in this same codebase*, and the draft says so plainly. A
 standard transformer of matched parameter count on the same corpus has never
 been run. Until it is, "better than this reference baseline" is the honest

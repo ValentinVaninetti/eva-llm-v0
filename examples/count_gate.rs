@@ -34,7 +34,7 @@ fn main() {
         }
         match table.lookup_detail(ctx, 256) {
             None => miss += 1,
-            Some((_, c)) if c == 2 => floor += 1,
+            Some((_, 2)) => floor += 1,
             Some((_, c)) if c <= 9 => low += 1,
             Some((_, c)) if c <= 49 => mid += 1,
             Some(_) => high += 1,

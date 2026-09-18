@@ -41,7 +41,7 @@ fn cmd_train(args: &[String]) -> Result<(), String> {
         conv_kernel: flag_num(args, "kernel", 5)?,
         eps: flag_num(args, "eps", 1e-5)?,
         seq_len: flag_num(args, "seq", 64)?,
-        arch: crate::model::Arch::from_str(&flag(args, "arch").unwrap_or_else(|| "clock".into()))?,
+        arch: crate::model::Arch::parse(&flag(args, "arch").unwrap_or_else(|| "clock".into()))?,
     };
     let tcfg = TrainConfig {
         data_path: data,

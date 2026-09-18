@@ -250,8 +250,8 @@ fn backward_op(n: &Node, g: &[f32]) -> Vec<(usize, Vec<f32>)> {
             let b_nd = n.saved_u[1 + a_nd];
             let b_shape = n.saved_u[2 + a_nd..2 + a_nd + b_nd].to_vec();
             let out_shape = broadcast_shape(&a_shape, &b_shape);
-            let b_br = broadcast_to(&b, &b_shape, &out_shape);
-            let a_br = broadcast_to(&a, &a_shape, &out_shape);
+            let b_br = broadcast_to(b, &b_shape, &out_shape);
+            let a_br = broadcast_to(a, &a_shape, &out_shape);
             let mut ga = vec![0.0; g.len()];
             let mut gb = vec![0.0; g.len()];
             for i in 0..g.len() {

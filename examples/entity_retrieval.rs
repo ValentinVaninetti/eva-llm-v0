@@ -31,8 +31,8 @@ fn env_usize(name: &str, dflt: usize) -> usize {
 /// belongs to a Spanish accented character (lead 0xC0-0xDF + continuation
 /// 0x80-0xBF). Keeps words like "días" together without gluing on em dashes.
 fn is_letter(b: u8) -> bool {
-    (b'A'..=b'Z').contains(&b)
-        || (b'a'..=b'z').contains(&b)
+    b.is_ascii_uppercase()
+        || b.is_ascii_lowercase()
         || (0xC0..=0xDF).contains(&b)
         || (0x80..=0xBF).contains(&b)
 }
@@ -242,7 +242,7 @@ fn detect_entities(ids: &[usize], min_count: usize) -> Vec<Entity> {
 
     let mut list: Vec<(Vec<u8>, usize, f32)> = Vec::new();
     for (w, &c) in &cap {
-        if *w.get(0).unwrap() > b'Z' {
+        if *w.first().unwrap() > b'Z' {
             continue; // non-ASCII first byte cannot be a latin proper name here
         }
         let mut lw = w.clone();

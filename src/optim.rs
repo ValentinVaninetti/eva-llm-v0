@@ -149,10 +149,10 @@ impl AdamW {
                 // same length `n`, and `run` doesn't return until every one
                 // finished.
                 update(
-                    pp.add(lo).as_mut(len),
+                    pp.offset_by(lo).as_mut(len),
                     gp.at(lo).as_ref(len),
-                    mp.add(lo).as_mut(len),
-                    vp.add(lo).as_mut(len),
+                    mp.offset_by(lo).as_mut(len),
+                    vp.offset_by(lo).as_mut(len),
                     c,
                 );
             });
@@ -216,10 +216,10 @@ mod tests {
             }
             let len = per.min(n - lo);
             update(
-                pp.add(lo).as_mut(len),
+                pp.offset_by(lo).as_mut(len),
                 gp.at(lo).as_ref(len),
-                mp.add(lo).as_mut(len),
-                vp.add(lo).as_mut(len),
+                mp.offset_by(lo).as_mut(len),
+                vp.offset_by(lo).as_mut(len),
                 c,
             );
         });

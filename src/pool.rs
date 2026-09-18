@@ -68,6 +68,12 @@ fn in_job<R>(body: impl FnOnce() -> R) -> R {
     r
 }
 
+impl Default for ThreadPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ThreadPool {
     pub fn new() -> Self {
         let ctl = Arc::new(Ctl {
@@ -217,7 +223,7 @@ impl Ptr<*const f32> {
 }
 
 impl Ptr<*mut f32> {
-    pub fn add(self, off: usize) -> Ptr<*mut f32> {
+    pub fn offset_by(self, off: usize) -> Ptr<*mut f32> {
         Ptr(unsafe { self.0.add(off) })
     }
 

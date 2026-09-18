@@ -184,7 +184,7 @@ impl Recall {
     pub fn bytes(&self) -> usize {
         self.tables
             .iter()
-            .map(|t| t.iter().map(|(_, v)| 8 + v.len() * 5).sum::<usize>())
+            .map(|t| t.values().map(|v| 8 + v.len() * 5).sum::<usize>())
             .sum()
     }
 }

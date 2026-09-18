@@ -39,6 +39,12 @@ pub struct Counter {
     by_op: Mutex<Vec<(&'static str, usize, usize)>>,
 }
 
+impl Default for Counter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Counter {
     pub const fn new() -> Self {
         Counter {

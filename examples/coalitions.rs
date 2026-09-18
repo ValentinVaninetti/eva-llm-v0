@@ -55,7 +55,7 @@ fn main() {
         } else {
             bpb_with_skip(&model, &ds, n_train, n, &skips)
         };
-        if mask as usize == total - 1 {
+        if mask == total - 1 {
             base = bpb;
         }
         rows.push((mask, (mask as u32).count_ones(), bpb));

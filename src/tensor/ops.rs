@@ -26,7 +26,7 @@ fn finalize(
 // probe run on a single thread and the record has to match the call order of
 // the blocks; a global would interleave blocks.
 thread_local! {
-    static WRITE_TRACE: std::cell::RefCell<Vec<f32>> = std::cell::RefCell::new(Vec::new());
+    static WRITE_TRACE: std::cell::RefCell<Vec<f32>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 pub fn write_trace_reset() {
@@ -697,6 +697,7 @@ pub fn clockmem_inject(
 ///   * NO division by a learned parameter: we learn inv_beta = 1/beta_read
 ///     directly and it MULTIPLIES, so a beta_read->0 singularity (a new
 ///     pathological gradient like alpha/q*g) cannot appear.
+///
 /// By construction the family contains the verified oracle: alpha_read=alpha_c
 /// and inv_beta=1/beta (=1 here) makes read[t] = write[t-N+1] EXACTLY, i.e.
 /// the op reduces to `clockmem_inject` (tested in r1c_reproduces_inject).

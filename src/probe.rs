@@ -112,8 +112,7 @@ pub fn run(model: &EvaModel, ds: &TextDataset, from: usize, to: usize) {
             tr.len()
         );
         let mut off = 0;
-        for bi in 0..n_clock {
-            let beta = betas[bi];
+        for &beta in betas.iter().take(n_clock) {
             for &is_new in classes.iter() {
                 let e = tr[off];
                 let r = tr[off + 1];

@@ -865,7 +865,7 @@ mod tests {
     }
 
     fn ramp(len: usize, seed: f32) -> Vec<f32> {
-        (0..len).map(|i| ((i as f32 * 0.017 + seed).sin())).collect()
+        (0..len).map(|i| (i as f32 * 0.017 + seed).sin() ).collect()
     }
 
     /// Needs a GPU with Vulkan, so it doesn't run in the normal suite:

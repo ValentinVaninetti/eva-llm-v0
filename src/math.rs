@@ -63,7 +63,7 @@ fn matmul_inner(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, out: &mut [f
         // distinct chunks never alias. The `'static` slices are sound only
         // because `pool::run` does not return until every piece has finished,
         // so nothing here outlives the borrow that produced these pointers.
-        let band = out_ptr.add(bs * n).as_mut((be - bs) * n);
+        let band = out_ptr.offset_by(bs * n).as_mut((be - bs) * n);
         matmul_rows(a_ptr.as_ref(m * k), b_ptr.as_ref(k * n), k, n, band, bs, 0, be - bs);
     };
     pool.run(chunks, f);

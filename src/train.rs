@@ -44,7 +44,7 @@ impl Trace {
     }
 
     fn maybe_print(&mut self, model: &EvaModel, step: usize) {
-        if step % self.every != 0 { return; }
+        if !step.is_multiple_of(self.every) { return; }
         for (bi, block) in model.blocks.iter().enumerate() {
             let Mixer::Clock(clock) = &block.mixer else { continue };
             // Use alpha_physical so the trace shows the REAL alpha in every
@@ -139,7 +139,7 @@ impl WreadTrace {
     }
 
     fn maybe_print(&mut self, model: &EvaModel, step: usize) {
-        if step % self.every != 0 { return; }
+        if !step.is_multiple_of(self.every) { return; }
         let n = self.n;
         for (bi, block) in model.blocks.iter().enumerate() {
             let Mixer::Clock(clock) = &block.mixer else { continue };
@@ -515,7 +515,7 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
                 wtr.maybe_print(&model, step);
             }
 
-            if step % tcfg.log_every == 0 {
+            if step.is_multiple_of(tcfg.log_every) {
                 let avg = running / tcfg.log_every as f32;
                 let elapsed = last_log.elapsed();
                 let sps = if elapsed.as_secs_f32() > 0.0 {
@@ -529,7 +529,7 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
                 last_log = Instant::now();
             }
 
-            if n_val > 0 && step % (tcfg.log_every * 5) == 0 {
+            if n_val > 0 && step.is_multiple_of(tcfg.log_every * 5) {
                 let vl = eval_loss(&model, &ds, n_train, n_windows);
                 println!("  validation: loss {:.4} | {:.3} bits/byte", vl, bits_per_byte(vl));
                 if vl < best_val_loss {
@@ -540,7 +540,7 @@ pub fn train(tcfg: &TrainConfig, mcfg: &EvaConfig) -> Result<(), String> {
                 }
             }
 
-            if step % (tcfg.log_every * 10) == 0 {
+            if step.is_multiple_of(tcfg.log_every * 10) {
                 let sample = generate_sample(&model, mcfg.seq_len, 64, &mut rng);
                 println!("sample: {:?}", ByteTokenizer::decode(&sample));
                 save_model(&tcfg.out_path, &model).map_err(|e| format!("could not save: {}", e))?;

@@ -110,15 +110,15 @@ fn main() {
         let (input, _t) = ds.window(wi);
         let activ = forward_layers(&model, &input, &alphas, &betas, n, kwin);
         for (li, _) in lays.iter().enumerate() {
-            for t in n..seq {
-                let v = &activ[t][li];
+            for row in &activ[n..seq] {
+                let v = &row[li];
                 for c in 0..d {
                     mean[li][c] += v[c] as f64;
                     var[li][c] += v[c] as f64 * v[c] as f64;
                 }
             }
         }
-        stats_cnt += (seq - n);
+        stats_cnt += seq - n;
     }
     let scl: Vec<Vec<f32>> = (0..nl)
         .map(|li| {
@@ -272,9 +272,7 @@ fn forward_layers(
             if activ[t].is_empty() {
                 activ[t] = vec![Vec::new(); nl];
             }
-            for li2 in 0..4 {
-                activ[t][li + li2] = layer[li2].clone();
-            }
+            activ[t][li..li + 4].clone_from_slice(&layer[..4]);
         }
         x = out;
     }

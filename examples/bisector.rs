@@ -76,7 +76,7 @@ fn main() {
     let mut b_pred = Vec::new();
     let mut b_scores_pool: Vec<(f64, bool)> = Vec::new(); // (score, is_first_error)
     for (span, &real) in bad.iter().zip(&first_error) {
-        let mut score = vec![0u32; SPAN];
+        let mut score = [0u32; SPAN];
         let (mut lo, mut hi) = (0usize, SPAN);
         while hi - lo > 1 {
             let mid = lo + (hi - lo) / 2;
@@ -168,8 +168,8 @@ fn auroc(pairs: &[(f64, bool)]) -> f64 {
         let mut j = i;
         while j < v.len() && v[j].0 == v[i].0 { j += 1; }
         let mid_rank = (i + 1 + j) as f64 / 2.0; // 1-based ranks, block average
-        for k in i..j {
-            if v[k].1 { pos_rank_sum += mid_rank; }
+        for e in &v[i..j] {
+            if e.1 { pos_rank_sum += mid_rank; }
         }
         i = j;
     }

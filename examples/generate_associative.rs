@@ -125,7 +125,7 @@ fn main() {
         let mut pos = 0usize;
         while pos + 1 < seq {
             let b = bytes[base + pos];
-            if (b as u16) >= KEY_LO && (b as u16) < KEY_HI {
+            if (KEY_LO..KEY_HI).contains(&(b as u16)) {
                 let key = b as usize;
                 let value = bytes[base + pos + 1];
                 match bound[key] {

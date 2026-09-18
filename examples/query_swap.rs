@@ -37,8 +37,6 @@ use eva_llm_v0::model::EvaModel;
 use eva_llm_v0::save::load_model;
 
 const KEY_HI: usize = 32;
-const VAL_LO: usize = 32;
-const VAL_HI: usize = 64;
 const FILLER_LO: usize = 64;
 
 fn softmax(row: &[f32]) -> Vec<f32> {

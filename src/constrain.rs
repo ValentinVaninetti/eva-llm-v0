@@ -74,10 +74,6 @@ pub struct Skeleton {
     /// max length and the byte that closes it.
     fixed: Vec<Vec<usize>>,
     slots: Vec<(usize, usize)>,
-    /// Position within the template.
-    at: usize,
-    /// How many bytes the current hole has emitted so far.
-    in_slot: usize,
 }
 
 impl Skeleton {
@@ -93,8 +89,6 @@ impl Skeleton {
         Skeleton {
             fixed: parts.iter().map(|p| p.bytes().map(|b| b as usize).collect()).collect(),
             slots: slots.iter().map(|&(n, b)| (n, b as usize)).collect(),
-            at: 0,
-            in_slot: 0,
         }
     }
 
@@ -156,13 +150,6 @@ mod tests {
 
     fn bytes(s: &str) -> Vec<usize> {
         s.bytes().map(|b| b as usize).collect()
-    }
-
-    fn as_text(a: &Allowed) -> String {
-        match a {
-            Allowed::Any => "free".into(),
-            Allowed::Only(v) => v.iter().map(|&b| b as u8 as char).collect(),
-        }
     }
 
     #[test]
